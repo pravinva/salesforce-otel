@@ -26,7 +26,7 @@ Secrets live in `~/.vibe/salesforce-otel/demo.env` (not in git).
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/salesforce-setup.md](docs/salesforce-setup.md), and [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md) (Phase A vs Private Link Phase B).
+See [docs/architecture.md](docs/architecture.md), [docs/salesforce-setup.md](docs/salesforce-setup.md), and [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md) (Phase A vs Private Link Phase B). Architecture figure: [docs/diagrams/suncorp_agentforce_otel_zerobus.png](docs/diagrams/suncorp_agentforce_otel_zerobus.png).
 
 **Live ingest (24 Oct 2026):** Agentforce session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 OTel spans → Zerobus HTTP 200 → rows in `agentforce_otel_spans`. That was on the **public** FEVM workspace. Private Link is a **separate Suncorp network build**, not something this lab can prove.
 

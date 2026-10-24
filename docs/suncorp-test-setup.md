@@ -1,5 +1,7 @@
 # Suncorp — recommended test setup
 
+![Suncorp Agentforce OpenTelemetry to Databricks Lakehouse](diagrams/suncorp_agentforce_otel_zerobus.png)
+
 Suncorp wants Agentforce OTel traces in Databricks for centralised AI
 observability, on workspaces with **AWS Private Link enforced end-to-end**.
 

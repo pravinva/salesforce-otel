@@ -1,0 +1,72 @@
+Create a polished Databricks-branded enterprise reference architecture diagram titled:
+
+"Suncorp — Agentforce OpenTelemetry to Databricks Lakehouse"
+
+Subtitle:
+"Centralised AI observability: poll Salesforce session traces, convert OTLP JSON to Protobuf, ingest with Zerobus over Private Link"
+
+Use a clean 16:9 white canvas, crisp typography, Databricks orange/red for Databricks platform components, dark charcoal for structure, cyan only for flow arrows. This must look suitable for a Suncorp architecture review. Avoid decorative clutter, 3D, photorealism, numbered circles, and tiny unreadable text.
+
+Use uploaded logos exactly as provided for Databricks, Unity Catalog, and Delta Lake. Do not invent or redraw those logos.
+
+LAYOUT — four large equal-height columns, left to right, with a single thick cyan request arrow through all four columns:
+
+COLUMN 1 — "Salesforce Agentforce"
+Rounded architecture block with a Salesforce-style cloud header.
+Inside, stacked cards with short labels only:
+- Agentforce Default agent
+- Session Tracing
+- Einstein Audit (dataspace default)
+- Data 360 session DMO
+Footer of column: "OTel REST — poll, not push"
+
+COLUMN 2 — "Telemetry bridge (Suncorp VPC)"
+Prominent badge: "RUNS IN SUNCORP VPC"
+Inside, stacked cards with short labels only:
+- Session poller
+- JSON to Protobuf
+- OpenTelemetry Collector
+- OAuth token refresh
+Footer of column: "No Kafka"
+
+COLUMN 3 — "Private connectivity"
+Prominent badge: "AWS PRIVATE LINK"
+Inside, stacked cards with short labels only:
+- Front-end Private Link
+- TCP 443
+- Private DNS
+- No public Zerobus route
+Footer of column: "OTLP yes — MQTT/Kafka APIs no"
+
+COLUMN 4 — "Databricks Lakehouse (AWS)"
+Make this the visually dominant block with a highlighted Databricks platform border and the Databricks logo at the top.
+Inside, stacked cards with short labels only:
+- Zerobus Ingest OTLP
+- Unity Catalog (uploaded logo)
+- Delta VARIANT span tables (uploaded Delta logo)
+- SQL and MLflow eval
+Footer of column: "Same region as producers"
+
+Draw a thinner charcoal response/ack arrow right-to-left labeled "OTLP HTTP 200 / durable write".
+
+BOTTOM BAND spanning the full width, titled:
+"What this diagram proves vs what networking must still provision"
+
+Left half card "Phase A — demonstrated":
+- Live Agentforce session traces in Unity Catalog Delta
+- 8 spans, Zerobus HTTP 200, no message bus
+- Lab workspace is public FEVM (not Private Link)
+
+Right half card "Phase B — Suncorp network build":
+- Collector in VPC, private DNS, no public Zerobus route
+- Repeat ingest + SQL from the VPC
+- Salesforce REST hop is separate (Salesforce Private Connect if required)
+
+Footer line:
+"Suncorp // Databricks  |  Field Engineering demonstration readout"
+
+Typography:
+- Title 28pt-equivalent, column headers 18pt-equivalent, card labels 14pt-equivalent
+- High contrast dark text on white/light fills
+- Align all blocks to a grid with equal gutters
+- Rounded 10px architecture cards, 3px borders, consistent padding

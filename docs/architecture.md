@@ -1,5 +1,11 @@
 # Architecture — Agentforce OTel → Databricks Zerobus (Suncorp demo)
 
+Bricksmith / Databricks-branded target architecture (Phase A data path plus Phase B Private Link):
+
+![Suncorp Agentforce OpenTelemetry to Databricks Lakehouse](diagrams/suncorp_agentforce_otel_zerobus.png)
+
+Prompt used to generate the figure: [suncorp_agentforce_otel_zerobus.txt](suncorp_agentforce_otel_zerobus.txt) (Bricksmith + Databricks brand style + Unity Catalog / Delta / Databricks logos).
+
 ## Production target (four layers)
 
 ```
