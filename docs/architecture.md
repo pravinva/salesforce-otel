@@ -18,7 +18,10 @@ of the lakehouse. Target workspaces use **AWS front-end Private Link**. The
 ingest path is **Zerobus Ingest OTLP** into Delta.
 
 The two products already publish the APIs this design uses. This demo wires
-them, then shows where Private Link attaches.
+them, then shows where Private Link attaches. End-to-end delay follows
+Salesforce Data 360 catch-up and the poll interval (typically tens of
+seconds to a few minutes after the session is readable). Zerobus writes
+Delta when the Protobuf POST arrives.
 
 ## 2. Salesforce session tracing
 
@@ -45,9 +48,10 @@ You can also query Data 360 DMOs with SOQL (for example
 `ssot__TelemetryTraceSpan__dlm`). That is a second read path into the same
 stored traces.
 
-In OpenTelemetry terms, an **exporter** is a process that POSTs OTLP to a
-URL you configure. The Salesforce API is a **session export GET**: the
-integration calls Salesforce and receives OTLP-shaped JSON.
+**OTLP** (OpenTelemetry Protocol) is the wire format for traces, metrics,
+and logs over HTTP or gRPC (`/v1/traces`, `/v1/metrics`, `/v1/logs`).
+Zerobus Ingest OTLP speaks that protocol. The Salesforce API returns
+OTLP-shaped **JSON** on GET; Zerobus accepts OTLP **Protobuf** on POST.
 
 ## 3. Databricks Zerobus Ingest
 
@@ -89,9 +93,12 @@ The bridge does three things:
    token.
 
 We implement that as a **poller** (Salesforce client) plus an
-**OpenTelemetry Collector** (Zerobus client). The poller is the OTLP
-exporter Salesforce leaves for you to run. The Collector is the long-lived
-push process in the VPC.
+**OpenTelemetry Collector** (Zerobus client). Phase A1 posted Protobuf
+from the poller straight to Zerobus. The Collector is the standing
+Databricks client when you want token refresh, batching, and Private Link
+egress from a VPC. This lab hosted it on EKS Fargate. Production can use
+EKS, ECS, a small VM, or a scheduled function. EKS is a host for that
+process. Zerobus only needs a client that POSTs Protobuf.
 
 ## 5. Architecture, hop by hop
 
@@ -100,14 +107,14 @@ into Data 360. The poller calls
 `GET /services/data/v66.0/einstein/audit/otel/{sessionId}`. On the figure:
 *PULL GET OTel JSON*.
 
-**AWS VPC — telemetry bridge on EKS.** This lab runs the bridge in account
+**AWS VPC — telemetry bridge.** This lab runs the Collector in account
 `332745928618`, region `ap-southeast-2`, EKS cluster `agentforce-otel`
 (Fargate).
 
-- **Poller** calls Salesforce, converts JSON to Protobuf, and POSTs to the
-  Collector at `:4318/v1/traces`. In this lab it runs on a laptop and uses
-  `kubectl port-forward`. At Suncorp, run it in the same VPC as the
-  Collector.
+- **Poller** calls Salesforce, converts JSON to Protobuf, and POSTs either
+  to Zerobus (A1) or to the Collector at `:4318/v1/traces` (A2). In this
+  lab it runs on a laptop (`kubectl port-forward` for A2). At Suncorp, run
+  it in the same VPC as the Collector.
 - **OpenTelemetry Collector** receives Protobuf, batches, sets source
   attributes, refreshes OAuth, and POSTs to Zerobus. On the figure: *PUSH
   OTLP Protobuf to Zerobus*.
@@ -139,9 +146,10 @@ Connect** (or an approved egress allowlist), as a separate control.
 | **A2** | Collector on EKS Fargate in this AWS VPC, POSTing to public Zerobus | **Done** 24 Oct 2026 |
 | **B** | Same Collector with Private Link: private DNS, VPC endpoint, POST and SQL from the VPC | Suncorp network build |
 
-A1 posted Protobuf directly while local Docker was down. A2 is the pattern
-to copy: Collector in a VPC. FEVM `fevm-ot-pdm-semi` is a public workspace,
-so A2 still uses the public Zerobus hostname.
+A1 posted Protobuf from the laptop to public Zerobus. A2 runs the Collector
+in a VPC on the same public hostname. FEVM `fevm-ot-pdm-semi` is a public
+workspace. Suncorp copies the Collector-in-VPC pattern onto Private Link;
+the lab host can be EKS, ECS, or an equivalent small process.
 
 From a laptop:
 
@@ -170,19 +178,99 @@ Phase B checks (private DNS, VPC endpoint connectivity, POST 200, SQL rows)
 are in [suncorp-test-setup.md](suncorp-test-setup.md).
 Org enablement is in [salesforce-setup.md](salesforce-setup.md).
 
-## 8. Design consequences
+## 8. Produce traces and inspect tables
+
+Catalog `ot_pdm_semi_catalog.agentforce_otel`. Warehouse used in the lab:
+**Suncorp Pilot SQL**. DDL is in `sql/01_create_otel_tables.sql`. Repeatable
+queries are in `sql/02_demo_queries.sql`.
+
+### 8.1 Produce an Agentforce session
+
+1. Confirm Session Tracing, Einstein Audit (dataspace `default`), and Agent
+   Platform Tracing are on (`docs/salesforce-setup.md`).
+2. Chat with **Agentforce (Default)** in Agent Builder, or run:
+
+```bash
+sf agent test run --api-name OTel_Demo_Test --target-org orgfarm918 --wait 10 --verbose
+```
+
+Lab utterance: `Hello, what can you do?` Expected topic: `GeneralCRM`.
+Copy `generatedData.sessionId`.
+
+3. Wait for Data 360 catch-up (often several minutes). Then:
+
+```bash
+DRY_RUN=true python3 poller/poll_agentforce.py
+```
+
+Observe: a session id, span count greater than zero, status complete. Empty
+spans means Data 360 is still catching up; wait and repeat.
+
+### 8.2 POST to Zerobus
+
+Direct (Phase A1):
+
+```bash
+SALESFORCE_SESSION_ID=<session-id> \
+  OTEL_COLLECTOR_TRACES_URL="https://${WORKSPACE_ID}.zerobus.${REGION}.cloud.databricks.com:443/v1/traces" \
+  python3 poller/poll_agentforce.py
+```
+
+Via Collector (Phase A2):
+
+```bash
+export AWS_PROFILE=unity-gateway-demo
+kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
+SALESFORCE_SESSION_ID=<session-id> \
+  OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces \
+  python3 poller/poll_agentforce.py
+```
+
+Observe on the client: `Exported N span(s)` and HTTP 200. Synthetic check:
+`python3 scripts/send_direct_zerobus.py`.
+
+### 8.3 Tables and what to look for
+
+| Table | When it grows | What to look for |
+|-------|---------------|------------------|
+| `agentforce_otel_spans` | Every successful trace POST | New `time`; `name` values such as `GeneralCRM_*`, `AiCopilot__ReactInitialPrompt`, `CLOSED_USER_REQUEST`, `TaskResolution`, `InstructionAdherence`; non-empty `trace_id` and `span_id`; `status.code`; `attributes` VARIANT with prompt/tool payload |
+| `agentforce_otel_logs` | When the session export includes log records | Rows sharing the same `trace_id`; `body` / `severity_text` |
+| `agentforce_otel_metrics` | When the session export includes metrics | Rows for the same window; `name` and points in VARIANT |
+
+A short Agentforce chat often fills **spans** first. Empty logs or metrics
+with populated spans is a valid session.
+
+```sql
+SELECT time, service_name, name, status.code, trace_id, span_id
+FROM ot_pdm_semi_catalog.agentforce_otel.agentforce_otel_spans
+ORDER BY time DESC
+LIMIT 20;
+```
+
+```sql
+SELECT name, COUNT(*) AS spans
+FROM ot_pdm_semi_catalog.agentforce_otel.agentforce_otel_spans
+WHERE time > current_timestamp() - INTERVAL 1 DAYS
+GROUP BY name
+ORDER BY spans DESC;
+```
+
+Lab session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` produced **8 spans** and
+Zerobus HTTP **200**. Match a new run by `time` descending and by `name`.
+
+## 9. Design consequences
 
 - The Salesforce contract is a **session GET of OTLP JSON**. The poller
   implements that client.
 - The Databricks contract is a **Protobuf POST** with Unity Catalog
-  authorization. The Collector implements that client.
-- Zerobus OTLP on TCP 443 is the Private Link attachment point. The
-  Collector is the process that sits on that hop.
+  authorization. The poller or the Collector performs that POST.
+- Zerobus OTLP on TCP 443 is the Private Link attachment point. A Collector
+  (or equivalent client) in Suncorp’s VPC sits on that hop.
 - `VARIANT` columns keep prompt and tool payloads for eval on the lakehouse.
 - Delta Sharing can return curated aggregates to Data Cloud after traces
   already land in Delta.
 
-## References
+## 10. References
 
 - [Export Agentforce Session Tracing Data](https://developer.salesforce.com/docs/ai/agentforce/guide/otel-api.html)
 - [Zerobus OTLP overview](https://docs.databricks.com/aws/en/ingestion/opentelemetry/)

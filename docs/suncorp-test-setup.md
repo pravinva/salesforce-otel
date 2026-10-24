@@ -2,27 +2,25 @@
 
 ![Suncorp Agentforce OpenTelemetry to Databricks Lakehouse](diagrams/suncorp_agentforce_otel_zerobus.png)
 
-Background and architecture (what Salesforce ships vs an OTel exporter, why
-the bridge exists) are in [architecture.md](architecture.md). This page is
-the test plan only.
+Background and architecture are in [architecture.md](architecture.md). This
+page is the test plan only.
 
-Suncorp wants Agentforce OTel traces in Databricks for centralised AI
-observability, on workspaces with **AWS Private Link enforced end-to-end**.
-
-Split the proof into two environments. Do **not** try to prove Private Link on
-the Field Engineering FEVM lab — that workspace is public.
+Suncorp workspaces use **AWS front-end Private Link**. The ingest path is
+Zerobus Ingest OTLP into Delta. Split the proof across two environments.
+The Field Engineering FEVM lab is a public workspace, so Private Link
+checks run on a Suncorp PL workspace.
 
 | Phase | Where | What it proves | Status |
 |-------|--------|----------------|--------|
-| **A1 — Functional ingest** | FEVM `fevm-ot-pdm-semi` | Agentforce **pull** (OTel JSON) → Protobuf **push** → public Zerobus → Delta, no Kafka | **Done** (24 Oct 2026) |
+| **A1 — Functional ingest** | FEVM `fevm-ot-pdm-semi` | Session GET → Protobuf POST → public Zerobus → Delta | **Done** (24 Oct 2026) |
 | **A2 — Collector in a VPC** | EKS `agentforce-otel` in AWS `332745928618` / `ap-southeast-2` | OTel Collector on Fargate **pushes** to public Zerobus | **Done** (24 Oct 2026) |
-| **B — Private path** | Suncorp PL workspace, same region as the VPC | Traffic never uses the public Zerobus hostname | **Needs Suncorp networking** |
+| **B — Private path** | Suncorp PL workspace, same region as the VPC | Collector POSTs through the VPC endpoint and private DNS | **Needs Suncorp networking** |
 
-Salesforce’s “OTel export” API is always **pull** (`GET` JSON for one session).
-It is **not** an OpenTelemetry exporter and cannot be aimed at Zerobus.
-Zerobus ingest is always **push** (OTLP Protobuf POST). The poller + Collector
-are the bridge. Phase B does not change that; it only privatises the
-Collector → Zerobus hop (VPC endpoint, private DNS, no public Zerobus route).
+The Salesforce session API is a **GET** of OTLP JSON for one session.
+Zerobus ingest is a **POST** of OTLP Protobuf. The poller is the Salesforce
+client; the Collector (or the poller in A1) is the Zerobus client. Phase B
+keeps those contracts and sends the POST through a VPC endpoint and private
+DNS.
 
 ## Phase A — already demonstrated (FEVM ingest + EKS Collector)
 
@@ -60,8 +58,8 @@ LIMIT 20;
 
 ## Phase B — Private Link test (Suncorp must provision)
 
-Zerobus OTLP **does** support front-end Private Link. MQTT and Kafka-compatible
-Zerobus APIs **do not**. See [Zerobus networking](https://docs.databricks.com/aws/en/ingestion/zerobus-networking)
+Zerobus OTLP is a documented front-end Private Link service on **TCP 443**.
+MQTT and Kafka-compatible Zerobus APIs use a separate networking model. See [Zerobus networking](https://docs.databricks.com/aws/en/ingestion/zerobus-networking)
 and [inbound PrivateLink for performance-intensive services](https://docs.databricks.com/aws/en/security/network/front-end/service-direct-privatelink)
 (Zerobus listed on **TCP 443**).
 
@@ -76,16 +74,17 @@ and [inbound PrivateLink for performance-intensive services](https://docs.databr
    names) resolve to the **VPC endpoint IP**, not public anycast.
 4. Subnet security group: inbound **TCP 443** from the collector/poller
    security group.
-5. Collector + poller in a **Suncorp VPC** with **no public route** to
-   `*.zerobus.*.cloud.databricks.com`.
+5. Collector + poller in a **Suncorp VPC**. The Collector POSTs to the
+   Private Link Zerobus hostname.
 6. If Delta storage is firewalled: allowlist Databricks **serverless outbound
    IPs** for that region (Zerobus → table storage is a second hop).
 7. Unity Catalog tables + table-level `SELECT`/`MODIFY` on a Suncorp catalog
    (same DDL as `sql/01_create_otel_tables.sql`, different three-part names).
 
-Salesforce REST to `/einstein/audit/otel/{id}` is **not** covered by Databricks
-Private Link. Privatise that hop separately with **Salesforce Private Connect**
-(or an approved egress to Salesforce API hostnames).
+The Salesforce GET to `/einstein/audit/otel/{id}` uses Salesforce’s network
+path. Databricks Private Link covers Collector → Zerobus. Private Salesforce
+egress is **Salesforce Private Connect** (or an approved allowlist), as a
+separate control.
 
 ### Phase B test cases (run from the VPC)
 
@@ -98,8 +97,8 @@ Private Link. Privatise that hop separately with **Salesforce Private Connect**
 | PL-5 | SQL on the Suncorp UC span table | New rows for the test session |
 | PL-6 | (Optional) Salesforce poller to OTel API | 200 with spans **or** documented Salesforce Private Connect path |
 
-Do not call Phase B complete unless **PL-3** fails and **PL-4/PL-5** succeed.
-That is the evidence Suncorp’s “full Private Link” control is doing work.
+Phase B is complete when PL-1, PL-2, PL-4, and PL-5 pass, and PL-3 shows
+the public hostname is unreachable from that subnet.
 
 ### Suggested owners
 
@@ -113,8 +112,8 @@ That is the evidence Suncorp’s “full Private Link” control is doing work.
 
 ## Recommended sequence for Suncorp
 
-1. Accept Phase A1 (direct ingest) and A2 (Collector on EKS in a VPC) as the
-   **functional** proof — no message bus; pull from Salesforce, push to Zerobus.
+1. Accept Phase A1 (direct ingest) and A2 (Collector in a VPC) as the
+   functional proof: session GET, Protobuf POST, Zerobus, Delta.
 2. Book a Phase B window on a **non-prod PL workspace** in the producer region.
 3. Reuse [`otel-collector/k8s/`](../otel-collector/k8s/) in the Suncorp VPC
    (swap catalog/schema/workspace ID; keep Protobuf + `x-databricks-zerobus-table-name`).

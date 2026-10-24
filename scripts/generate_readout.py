@@ -49,13 +49,13 @@ LINE_HEX = "D9E0E7"
 KICKER = "ARCHITECTURE READOUT"
 TITLE = "Agentforce session traces to Databricks Zerobus"
 SUBTITLE = (
-    "How Salesforce Agentforce session traces reach Unity Catalog Delta tables through a telemetry "
-    "bridge on EKS, and where AWS Private Link attaches for Suncorp."
+    "How Salesforce Agentforce session traces reach Unity Catalog Delta tables: session export GET, "
+    "Protobuf POST to Zerobus Ingest OTLP, and where AWS Private Link attaches for Suncorp."
 )
 
 META_ROWS = [
     ["Customer", "Suncorp"],
-    ["Scope", "Centralised AI observability for Salesforce Agentforce on Databricks (AWS)"],
+    ["Scope", "Land Agentforce session traces in Unity Catalog Delta via Zerobus Ingest OTLP"],
     ["Lab environment", "Salesforce OrgFarm orgfarm918; Databricks FEVM fevm-ot-pdm-semi (us-east-1); AWS account 332745928618, EKS agentforce-otel (ap-southeast-2)"],
     ["Prepared by", AUTHOR],
     ["Date", "24 October 2026"],
@@ -82,8 +82,8 @@ COMPONENT_ROWS = [
     ],
     [
         "Session poller",
-        "AWS VPC (laptop in the lab)",
-        "Discovers finished sessions, GETs JSON, converts to Protobuf, fills empty spanIds, POSTs to the Collector.",
+        "Laptop in the lab; Suncorp VPC in production",
+        "Discovers finished sessions, GETs JSON, converts to Protobuf, fills empty spanIds, POSTs to the Collector or to Zerobus.",
     ],
     [
         "OpenTelemetry Collector",
@@ -110,7 +110,7 @@ PHASE_ROWS = [
     ],
     [
         "A2",
-        "OpenTelemetry Collector on EKS Fargate in an AWS VPC, POSTing to public Zerobus.",
+        "OpenTelemetry Collector in an AWS VPC (lab host: EKS Fargate), POSTing to public Zerobus.",
         "Done, 24 October 2026",
     ],
     [
@@ -119,6 +119,35 @@ PHASE_ROWS = [
         "Suncorp network build",
     ],
 ]
+
+OBSERVE_ROWS = [
+    [
+        "agentforce_otel_spans",
+        "Every successful trace POST",
+        "New time; names such as GeneralCRM_*, AiCopilot__ReactInitialPrompt, CLOSED_USER_REQUEST, TaskResolution, InstructionAdherence; populated trace_id and span_id; status.code; attributes VARIANT with prompt and tool payload.",
+    ],
+    [
+        "agentforce_otel_logs",
+        "When the session export includes log records",
+        "Rows sharing the same trace_id; body and severity_text.",
+    ],
+    [
+        "agentforce_otel_metrics",
+        "When the session export includes metrics",
+        "Rows in the same window; metric name and points in VARIANT.",
+    ],
+]
+
+SQL_RECENT = """SELECT time, service_name, name, status.code, trace_id, span_id
+FROM ot_pdm_semi_catalog.agentforce_otel.agentforce_otel_spans
+ORDER BY time DESC
+LIMIT 20;"""
+
+SQL_NAMES = """SELECT name, COUNT(*) AS spans
+FROM ot_pdm_semi_catalog.agentforce_otel.agentforce_otel_spans
+WHERE time > current_timestamp() - INTERVAL 1 DAYS
+GROUP BY name
+ORDER BY spans DESC;"""
 
 LAB_PROD_ROWS = [
     ["Salesforce", "OrgFarm DE orgfarm918", "Suncorp Agentforce + Data Cloud"],
@@ -146,14 +175,16 @@ SECTIONS = {
         "and writes Unity Catalog Delta tables."
     ),
     "def_bridge": (
-        "<b>Telemetry bridge</b> is the poller and OpenTelemetry Collector pair. The poller is the Salesforce "
-        "client. The Collector is the Zerobus client and runs in the VPC."
+        "<b>Telemetry bridge</b> is the poller plus a Zerobus client. The poller is the Salesforce client. "
+        "The Zerobus client is the poller itself (Phase A1) or an OpenTelemetry Collector in the VPC (Phase A2). "
+        "This lab hosted the Collector on EKS Fargate."
     ),
     "background_1": (
         "Suncorp runs customer-facing work on Salesforce Agentforce: LLM reasoning, tool calls, and CRM actions. "
-        "Platform and risk teams need the same traces in Databricks so they can query conversations, run "
-        "evaluations, and retain the data with the rest of the lakehouse. Suncorp workspaces use AWS front-end "
-        "Private Link. The ingest path is Zerobus Ingest OTLP into Delta."
+        "Platform and risk teams query those traces in Databricks, run evaluations, and retain them with the rest "
+        "of the lakehouse. Suncorp workspaces use AWS front-end Private Link. The ingest path is Zerobus Ingest "
+        "OTLP into Delta. Delay follows Data 360 catch-up and the poll interval, typically tens of seconds to a "
+        "few minutes after the session is readable in Salesforce."
     ),
     "background_2": (
         "Both products publish the APIs this design uses. This lab wires them together on Databricks and AWS "
@@ -171,9 +202,9 @@ SECTIONS = {
         "guidance is to POST this JSON to the observability backend you operate."
     ),
     "salesforce_3": (
-        "Data 360 DMOs such as ssot__TelemetryTraceSpan__dlm offer a second read path through SOQL. In "
-        "OpenTelemetry terms, an exporter POSTs OTLP to a URL you configure. The Salesforce endpoint is a session "
-        "export GET, so the integration calls Salesforce and receives the payload."
+        "Data 360 DMOs such as ssot__TelemetryTraceSpan__dlm offer a second read path through SOQL. "
+        "OTLP is the OpenTelemetry Protocol for traces, metrics, and logs over HTTP or gRPC. Zerobus Ingest OTLP "
+        "accepts that protocol as Protobuf on POST. The Salesforce endpoint returns OTLP-shaped JSON on GET."
     ),
     "zerobus_1": (
         "Zerobus Ingest OTLP is a managed gateway. A client POSTs OTLP to "
@@ -197,14 +228,15 @@ SECTIONS = {
         "8-byte id so the batch is valid OTLP."
     ),
     "bridge_3": (
-        "The poller implements the Salesforce client and acts as the OTLP exporter for Agentforce. The Collector "
-        "implements the Zerobus client and is the long-lived push process in the VPC."
+        "The poller is the Salesforce client. It can POST Protobuf straight to Zerobus (Phase A1). The Collector "
+        "is the standing Databricks client for token refresh, batching, and Private Link egress from a VPC "
+        "(Phase A2). Production can host that client on EKS, ECS, a small VM, or a scheduled function."
     ),
     "arch_1": (
         "Figure 1 reads left to right. Agentforce writes sessions into Data 360. The poller GETs the session JSON "
-        "(PULL GET OTel JSON). Inside the AWS VPC, the poller POSTs Protobuf to the OpenTelemetry Collector on EKS "
-        "Fargate (PUSH Protobuf), and the Collector POSTs to Zerobus (PUSH OTLP Protobuf to Zerobus). Zerobus "
-        "returns HTTP 200 once the write is durable."
+        "(PULL GET OTel JSON). The poller POSTs Protobuf to the Collector (PUSH Protobuf), and the Collector POSTs "
+        "to Zerobus (PUSH OTLP Protobuf to Zerobus). Zerobus returns HTTP 200 once the write is durable. Phase A1 "
+        "used the same Protobuf POST from the laptop with the Collector omitted."
     ),
     "arch_2": (
         "Today the Collector POSTs over public HTTPS to FEVM Zerobus in us-east-1. Phase B keeps the same "
@@ -214,20 +246,45 @@ SECTIONS = {
         "separate control."
     ),
     "lab_1": (
-        "A1 posted Protobuf directly to Zerobus while local Docker was unavailable. A2 runs the Collector in an "
-        "AWS VPC, which is the pattern Suncorp copies. FEVM fevm-ot-pdm-semi is a public workspace, so A2 uses the "
-        "public Zerobus hostname. Manifests are in otel-collector/k8s/."
+        "A1 posted Protobuf from the laptop to public Zerobus. A2 runs the Collector in a VPC on the same public "
+        "hostname. FEVM fevm-ot-pdm-semi is a public workspace. Suncorp copies the Collector-in-VPC pattern onto "
+        "Private Link. Manifests are in otel-collector/k8s/."
     ),
     "lab_2": (
         "Phase B checks cover private DNS resolution, VPC endpoint connectivity, an OTLP POST returning HTTP 200, "
         "and SQL rows for the test session. The detailed cases sit in suncorp-test-setup.md."
     ),
     "delivery": (
-        "Suncorp reuses the EKS manifests in its own VPC, swaps the workspace id, catalog, and schema, and keeps "
-        "Protobuf with x-databricks-zerobus-table-name. Suncorp networking provisions the VPC endpoint and private "
-        "DNS for Zerobus OTLP. The poller moves into the same VPC as the Collector and authenticates to Salesforce "
+        "Suncorp places a Zerobus client (Collector or equivalent) in its VPC, swaps workspace id, catalog, and "
+        "schema, and keeps Protobuf with x-databricks-zerobus-table-name. Suncorp networking provisions the VPC "
+        "endpoint and private DNS for Zerobus OTLP. The poller runs in the same VPC and authenticates to Salesforce "
         "through an External Client App. VARIANT columns keep prompt and tool payloads available for MLflow "
-        "evaluation, and Delta Sharing can return curated aggregates to Data Cloud once traces land in Delta."
+        "evaluation. Delta Sharing can return curated aggregates to Data Cloud once traces land in Delta."
+    ),
+    "run_1": (
+        "Catalog ot_pdm_semi_catalog.agentforce_otel. Use the Suncorp Pilot SQL warehouse. DDL is sql/01_create_otel_tables.sql. "
+        "Repeatable queries are sql/02_demo_queries.sql."
+    ),
+    "run_2": (
+        "Produce a session: enable Session Tracing and Einstein Audit (dataspace default), then chat with Agentforce (Default) "
+        "or run sf agent test run --api-name OTel_Demo_Test --target-org orgfarm918 --wait 10 --verbose. Lab utterance: "
+        "Hello, what can you do? Expected topic: GeneralCRM. Copy generatedData.sessionId."
+    ),
+    "run_3": (
+        "Wait for Data 360 catch-up (often several minutes). Run DRY_RUN=true python3 poller/poll_agentforce.py. "
+        "Observe a session id, span count greater than zero, and complete status. Empty spans means Data 360 is still catching up."
+    ),
+    "run_4": (
+        "POST Protobuf. Phase A1: set OTEL_COLLECTOR_TRACES_URL to "
+        "https://{WORKSPACE_ID}.zerobus.{REGION}.cloud.databricks.com:443/v1/traces and run poller/poll_agentforce.py with "
+        "SALESFORCE_SESSION_ID. Phase A2: kubectl port-forward svc/otel-collector 4318:4318 and POST to "
+        "http://127.0.0.1:4318/v1/traces. Observe Exported N span(s) and HTTP 200. Synthetic check: "
+        "python3 scripts/send_direct_zerobus.py."
+    ),
+    "run_5": (
+        "A short Agentforce chat often fills spans first. Empty logs or metrics with populated spans is a valid session. "
+        "Lab session 01a16cb0-5079-71ce-a37e-9aee0cb3c332 produced 8 spans and Zerobus HTTP 200. Match a new run by time "
+        "descending and by name."
     ),
 }
 
@@ -353,7 +410,20 @@ def build_pdf():
             p("Table 4. Lab environment against the Suncorp target.", s["caption"]),
         ]),
         p(SECTIONS["lab_2"], s["body"]),
-        p("9. Delivery implication", s["h1"]),
+        p("9. Produce traces and inspect tables", s["h1"]),
+        p(SECTIONS["run_1"], s["body"]),
+        p("9.1 Produce an Agentforce session", s["h2"]),
+        p(SECTIONS["run_2"], s["body"]),
+        p(SECTIONS["run_3"], s["body"]),
+        p("9.2 POST to Zerobus", s["h2"]),
+        p(SECTIONS["run_4"], s["body"]),
+        p("9.3 Tables and what to look for", s["h2"]),
+        data_table(["Table", "When it grows", "What to look for"], OBSERVE_ROWS, [38 * mm, 42 * mm, 94 * mm], s, 7.6),
+        p("Table 5. Unity Catalog tables after a successful POST.", s["caption"]),
+        p(SECTIONS["run_5"], s["body"]),
+        Preformatted(SQL_RECENT, s["code"]),
+        Preformatted(SQL_NAMES, s["code"]),
+        p("10. Delivery implication", s["h1"]),
         p(SECTIONS["delivery"], s["body"]),
     ]
 
@@ -571,7 +641,21 @@ def build_docx():
     add_caption(doc, "Table 4. Lab environment against the Suncorp target.")
     add_body(doc, SECTIONS["lab_2"])
 
-    add_heading(doc, "9. Delivery implication", 1)
+    add_heading(doc, "9. Produce traces and inspect tables", 1)
+    add_body(doc, SECTIONS["run_1"])
+    add_heading(doc, "9.1 Produce an Agentforce session", 2)
+    add_body(doc, SECTIONS["run_2"])
+    add_body(doc, SECTIONS["run_3"])
+    add_heading(doc, "9.2 POST to Zerobus", 2)
+    add_body(doc, SECTIONS["run_4"])
+    add_heading(doc, "9.3 Tables and what to look for", 2)
+    add_table(doc, ["Table", "When it grows", "What to look for"], OBSERVE_ROWS)
+    add_caption(doc, "Table 5. Unity Catalog tables after a successful POST.")
+    add_body(doc, SECTIONS["run_5"])
+    add_code(doc, SQL_RECENT)
+    add_code(doc, SQL_NAMES)
+
+    add_heading(doc, "10. Delivery implication", 1)
     add_body(doc, SECTIONS["delivery"])
 
     doc.save(str(DOCX_OUT))

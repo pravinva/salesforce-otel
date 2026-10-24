@@ -84,11 +84,10 @@ Session id is in `generatedData.sessionId`.
 Alternatively chat in Agent Builder / Copilot panel. Draft-only preview on an
 **inactive** custom bot often never lands in Session Tracing.
 
-## 5. Poll OTel (this is a pull, not an exporter)
+## 5. Poll OTel
 
 The [Export Agentforce Session Tracing Data API](https://developer.salesforce.com/docs/ai/agentforce/guide/otel-api.html)
-is **not** an OpenTelemetry exporter. Agentforce does not `POST` traces to
-Databricks. You `GET` OTLP-shaped **JSON** for **one session id**:
+returns OTLP-shaped **JSON** for **one session id**:
 
 ```
 GET /services/data/v66.0/einstein/audit/otel/{session-id}
@@ -101,13 +100,13 @@ GET /services/data/v66.0/einstein/audit/otel/{session-id}
 - Dummy UUID → `404 session not found` means the API is enabled
 - Empty `spanId` on evaluation spans (`TaskResolution`, `InstructionAdherence`)
   is handled in `poller/json_to_otlp.py`
-- SOQL on DMOs such as `ssot__TelemetryTraceSpan__dlm` is a **second pull**,
-  not a push path
+- SOQL on DMOs such as `ssot__TelemetryTraceSpan__dlm` is a second read path
+  into the same stored traces
 
-Salesforce’s “send this JSON to Datadog/Splunk” step is **our poller**. Zerobus
-rejects JSON, so we convert to Protobuf, then **push** to the Collector
-(`OTEL_COLLECTOR_TRACES_URL`, default `http://127.0.0.1:4318/v1/traces` after
-`kubectl port-forward` to EKS).
+The poller converts that JSON to Protobuf and POSTs it to Zerobus or to the
+Collector (`OTEL_COLLECTOR_TRACES_URL`). See
+[architecture.md](architecture.md) section 8 for the full produce-and-inspect
+runbook.
 
 ```bash
 sf org display -o orgfarm918
