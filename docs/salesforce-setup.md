@@ -5,39 +5,53 @@ Org used for this demo:
 - Login URL: `https://orgfarm-91850b6147-dev-ed.develop.my.salesforce.com`
 - Username: `pravin.varmadbrx.24b133d4e353@agentforce.com`
 - Alias (sf CLI): `orgfarm918`
+- Agent used for live traces: **Agentforce (Default)** / `Copilot_for_Salesforce`
 
-## Current org status (checked during scaffold)
-
-Against `orgfarm-91850b6147-dev-ed`:
+## Current org status (24 Oct 2026)
 
 | Check | Result |
 |-------|--------|
 | sf CLI login | Connected (`orgfarm918`) |
-| `AiAgent` sObject | Present |
-| Session Trace OTel API | **`FUNCTIONALITY_NOT_ENABLED`** (`EinsteinAuditResourceFamily`) |
-| `ssot__AiAgentSession__dlm` | **Not available** (Data 360 Session Tracing DMOs not provisioned) |
+| Data Cloud | **Enabled**; Data Space `default` (`0vhaj000001VLKXAA4`) **ACTIVE** |
+| Einstein Audit dataspace | **Bound to `default`** (Setup UI only — not Metadata API) |
+| Agentforce Session Tracing | On |
+| Agent Platform Tracing | On |
+| Audit and Feedback | On (`enableAIFeedbackWithDC = true`) |
+| Session Trace OTel API | **Healthy** — dummy UUID returns `404 session not found` |
+| `ssot__AiAgentSession__dlm` | **Mapped and queryable** |
+| `GenAIFeedback__dlm` | **Mapped and queryable** |
+| SSOT entities | **153** after tracing semantic model finished |
+| Live session ingested | `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 spans in Delta |
 
-Until Einstein Audit / Session Tracing is enabled, the poller cannot fetch live
-Agentforce OTel. The Databricks Zerobus path is already validated with synthetic spans.
+CLI cannot set the Einstein Audit Data Space picker. After Data Cloud shows
+**Enabled**, open:
+
+`sf org open -o orgfarm918 -p lightning/setup/EinsteinAuditAnalyticsMonitoring/home`
+
+Hard-refresh, choose **default**, Save. Until that bind exists, OTel returns
+`No selected dataspace for Einstein Audit`.
+
+Provisioning after the bind is sequential. OTel may 500 on missing
+`ssot__AiAgentSession__dlm` then `GenAIFeedback__dlm` for 15–60+ minutes.
 
 ## 1. Enable Agentforce
 
 1. Setup → Quick Find → **Agentforce Settings**
-2. Toggle **Enable Agentforce** → On
+2. Toggle **Enable Agentforce** → On (Default agent cannot be `sf agent activate`’d)
 
 ## 2. Enable Data 360 + Session Tracing + Audit
 
-1. Setup → **Data Cloud Setup Home** — turn on Data 360 and wait until live
-2. Setup → **Einstein Audit, Analytics, and Monitoring Setup**
-3. Confirm a dataspace is selected (often `default`)
-4. Turn on:
-   - **Agentforce Session Tracing** (Data model can take ~10 minutes)
+1. Setup → **Data Cloud Setup Home** — turn on Data 360 and wait until **Enabled**
+2. Setup → **Einstein Audit, Analytics, and Monitoring Setup** (not the Agentforce model page)
+3. Select Data Space **`default`** and Save
+4. Confirm:
+   - **Agentforce Session Tracing**
    - **Audit and Feedback**
    - **Agent Platform Tracing** if listed
 
-If the OTel API still returns `FUNCTIONALITY_NOT_ENABLED`, the org edition may
-lack Einstein Audit entitlements — use a **Data Cloud & Agentforce Developer Trial**
-from [Salesforce free trials](https://www.salesforce.com/form/developer-signup/) rather than a plain OrgFarm.
+Useful permsets on the running user: `GenieAdmin` (Data Cloud Architect),
+`CopilotSalesforceUser`, `CopilotSalesforceAdmin`. `CDPAdmin` may fail on DE
+(`CdpPsl` disabled); Genie starter PSL is the DE licence.
 
 ## 3. Activate Data 360 streams
 
@@ -48,42 +62,29 @@ In **Data Cloud → Data Streams**, ensure these are Active and refresh each:
 - `AiAgentInteractionMessage`
 - `AiAgentInteractionStep`
 
-Until streams are active, the OTel API can return `404` even after chats.
+Until streams are mapped, OTel can 500 (`table does not exist`) or 404 even
+after chats. Data Cloud catch-up after a conversation was **~6 minutes** in this lab.
 
-## 4. Create / activate a test agent
+## 4. Generate a traced session (CLI)
 
-1. Setup → **Agents** → New Agent → Service Agent  
-   Name example: `Databricks Ingest Tester`
-2. **Activate / publish** the agent  
-   Draft-only preview sessions often do **not** appear in Session Tracing.
-
-## 5. Generate telemetry
-
-In Agentforce Builder Preview (or the published channel), run a multi-turn chat:
-
-> Hello, what can you do? Can you help me look up a standard tool?
-
-Wait a few minutes for Data 360 catch-up, then run the poller.
-
-## 6. External Client App (recommended for the poller)
-
-For unattended polling, create an **External Client App**:
-
-1. Setup → External Client Apps / App Manager
-2. Enable **Client Credentials Flow**
-3. API scope: **Manage user data via APIs (`api`)**  
-   Using only `full` can fail with `invalid_grant: no valid scopes defined`
-4. Set **Run As** to a user with Data Cloud + Einstein Audit access
-5. Copy Consumer Key / Secret into:
+Default Agentforce agent is enough; a custom service agent is optional.
 
 ```bash
-SALESFORCE_CLIENT_ID=...
-SALESFORCE_CLIENT_SECRET=...
+# One-off test spec → org (see /tmp or a local specs/ file)
+sf agent test create --spec specs/OTel_Demo_Test.yaml \
+  --api-name OTel_Demo_Test --target-org orgfarm918 --force-overwrite
+
+sf agent test run --api-name OTel_Demo_Test --target-org orgfarm918 --wait 10 --verbose
 ```
 
-Until the ECA exists, the poller falls back to the `sf` CLI session for `orgfarm918`.
+Utterance used in the lab: `Hello, what can you do?`  
+Expected topic: `GeneralCRM`  
+Session id is in `generatedData.sessionId`.
 
-## 7. OTel API (beta) limits
+Alternatively chat in Agent Builder / Copilot panel. Draft-only preview on an
+**inactive** custom bot often never lands in Session Tracing.
+
+## 5. Poll OTel
 
 ```
 GET /services/data/v66.0/einstein/audit/otel/{session-id}
@@ -91,13 +92,24 @@ GET /services/data/v66.0/einstein/audit/otel/{session-id}
 
 - One session ID per request (no bulk yet)
 - Sessions must have `StartTimestamp` within the prior **72 hours**
-- Data 360 required for the beta
-- Connect API rate limits apply
-
-## 8. Verify from CLI
+- Dummy UUID → `404 session not found` means the API is enabled
+- Empty `spanId` on evaluation spans (`TaskResolution`, `InstructionAdherence`)
+  is handled in `poller/json_to_otlp.py`
 
 ```bash
 sf org display -o orgfarm918
-# After a conversation + Data 360 catch-up:
-cd poller && DRY_RUN=true python3 poll_agentforce.py
+DRY_RUN=true python3 poller/poll_agentforce.py
+# Pin a session:
+SALESFORCE_SESSION_ID=01a16cb0-5079-71ce-a37e-9aee0cb3c332 python3 poller/poll_agentforce.py
 ```
+
+## 6. External Client App (recommended for unattended poller)
+
+1. Setup → External Client Apps / App Manager
+2. Enable **Client Credentials Flow**
+3. API scope: **Manage user data via APIs (`api`)**  
+   Using only `full` can fail with `invalid_grant: no valid scopes defined`
+4. Set **Run As** to a user with Data Cloud + Einstein Audit access
+5. Copy Consumer Key / Secret into `SALESFORCE_CLIENT_ID` / `SALESFORCE_CLIENT_SECRET`
+
+Until the ECA exists, the poller falls back to the `sf` CLI session for `orgfarm918`.

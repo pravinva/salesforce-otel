@@ -26,9 +26,11 @@ Secrets live in `~/.vibe/salesforce-otel/demo.env` (not in git).
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md). Salesforce setup: [docs/salesforce-setup.md](docs/salesforce-setup.md).
+See [docs/architecture.md](docs/architecture.md), [docs/salesforce-setup.md](docs/salesforce-setup.md), and [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md) (Phase A vs Private Link Phase B).
 
-Collector deployment choice for this demo: **Docker locally** (same YAML works on **EC2**; for EKS wrap as a Deployment + ConfigMap).
+**Live ingest (24 Oct 2026):** Agentforce session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 OTel spans → Zerobus HTTP 200 → rows in `agentforce_otel_spans`. That was on the **public** FEVM workspace. Private Link is a **separate Suncorp network build**, not something this lab can prove.
+
+Collector YAML is the production path (EC2 or EKS in a Suncorp VPC). This lab ingested **direct OTLP Protobuf to Zerobus** when Docker was unavailable.
 
 ## Quick start
 
@@ -79,8 +81,8 @@ Warehouse tip: start **Suncorp Pilot SQL** (`4c66e7da442d0341`) on the FEVM work
 ### 5. Poll real Agentforce sessions
 
 1. Complete [docs/salesforce-setup.md](docs/salesforce-setup.md)
-2. Chat with an **activated** agent
-3. Run:
+2. Generate a session (`sf agent test run` or an Agent Builder chat)
+3. Wait for Data Cloud catch-up (several minutes), then:
 
 ```bash
 # Dry-run discovery / fetch only
@@ -97,18 +99,20 @@ sql/                 UC DDL + demo queries
 otel-collector/      Collector YAML + docker-compose (EC2/EKS-ready)
 poller/              Salesforce Session Trace poller (JSON→Protobuf)
 scripts/             Synthetic spans + Zerobus token mint
-docs/                Architecture + Salesforce setup
+docs/                Architecture, Salesforce setup, Suncorp test plan, PDF/DOCX readout
 ```
 
 ## Production notes
 
-- Prefer Collector on **EKS** for HA; **EC2** is fine for PoC.
+- Prefer Collector on **EKS** in the Suncorp VPC for HA and Private Link; **EC2** is fine for PoC.
 - Grant the SP **table-level** `MODIFY` + `SELECT` (schema inheritance is not enough for Zerobus `authorization_details`).
 - Zerobus accepts **Protobuf only** on OTLP/HTTP — never post Salesforce’s JSON body directly to Zerobus.
+- **Private Link:** OTLP is supported; MQTT/Kafka Zerobus APIs are not. Test plan is in [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md).
 - Optional next step: Zero-Copy share curated span aggregates back to Salesforce Data Cloud.
 
 ## References
 
 - [Ingest OpenTelemetry with Zerobus](https://docs.databricks.com/aws/en/ingestion/opentelemetry/)
 - [Configure OTLP clients](https://docs.databricks.com/aws/en/ingestion/opentelemetry/configure)
+- [Zerobus networking / Private Link](https://docs.databricks.com/aws/en/ingestion/zerobus-networking)
 - [Export Agentforce Session Tracing Data](https://developer.salesforce.com/docs/ai/agentforce/guide/otel-api.html)

@@ -32,3 +32,6 @@ otelcol
 
 # Samples that may contain PII
 samples/live/
+
+# Local Salesforce metadata retrieve (do not commit)
+sf-metadata/

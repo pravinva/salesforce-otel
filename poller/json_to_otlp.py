@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import re
 from typing import Any
 
@@ -33,14 +34,18 @@ def _as_resource_spans_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-def _hex_or_raw_to_b64(value: Any, expected_bytes: int) -> Any:
-    """Convert OTLP/JSON hex IDs to protobuf-JSON base64 bytes strings."""
-    if not isinstance(value, str) or not value:
+def _fill_hex_id(value: Any, expected_bytes: int, seed: str) -> str:
+    """Return a hex ID of the OTLP length. Salesforce sometimes omits spanId."""
+    if isinstance(value, str) and _HEX_RE.fullmatch(value) and len(value) == expected_bytes * 2:
         return value
-    # Already looks like base64 of the right length? leave alone if not hex
-    if _HEX_RE.fullmatch(value) and len(value) == expected_bytes * 2:
-        return base64.b64encode(bytes.fromhex(value)).decode("ascii")
-    return value
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return digest[: expected_bytes * 2]
+
+
+def _hex_or_raw_to_b64(value: Any, expected_bytes: int, seed: str = "") -> Any:
+    """Convert OTLP/JSON hex IDs to protobuf-JSON base64 bytes strings."""
+    hex_id = _fill_hex_id(value, expected_bytes, seed)
+    return base64.b64encode(bytes.fromhex(hex_id)).decode("ascii")
 
 
 def _normalize_ids(payload: dict[str, Any]) -> dict[str, Any]:
@@ -58,20 +63,22 @@ def _normalize_ids(payload: dict[str, Any]) -> dict[str, Any]:
             scopes = rs["scopeSpans"]
         for scope in scopes:
             for span in scope.get("spans") or []:
-                if "traceId" in span:
-                    span["traceId"] = _hex_or_raw_to_b64(span["traceId"], 16)
-                if "trace_id" in span:
-                    span["traceId"] = _hex_or_raw_to_b64(span.pop("trace_id"), 16)
-                if "spanId" in span:
-                    span["spanId"] = _hex_or_raw_to_b64(span["spanId"], 8)
-                if "span_id" in span:
-                    span["spanId"] = _hex_or_raw_to_b64(span.pop("span_id"), 8)
-                if "parentSpanId" in span and span["parentSpanId"]:
-                    span["parentSpanId"] = _hex_or_raw_to_b64(span["parentSpanId"], 8)
-                if "parent_span_id" in span and span["parent_span_id"]:
+                name = str(span.get("name") or "")
+                raw_trace = span.get("traceId") or span.get("trace_id") or ""
+                raw_span = span.get("spanId") or span.get("span_id") or ""
+                seed = f"{raw_trace}|{name}|{raw_span}"
+                span["traceId"] = _hex_or_raw_to_b64(raw_trace, 16, seed + "|trace")
+                span.pop("trace_id", None)
+                span["spanId"] = _hex_or_raw_to_b64(raw_span, 8, seed + "|span")
+                span.pop("span_id", None)
+                raw_parent = span.get("parentSpanId") or span.get("parent_span_id") or ""
+                if raw_parent:
                     span["parentSpanId"] = _hex_or_raw_to_b64(
-                        span.pop("parent_span_id"), 8
+                        raw_parent, 8, seed + "|parent"
                     )
+                else:
+                    span.pop("parentSpanId", None)
+                span.pop("parent_span_id", None)
                 # Links
                 for link in span.get("links") or []:
                     if "traceId" in link:
