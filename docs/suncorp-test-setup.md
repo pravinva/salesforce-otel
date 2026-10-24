@@ -39,15 +39,20 @@ OTEL_COLLECTOR_TRACES_URL="https://${WORKSPACE_ID}.zerobus.${REGION}.cloud.datab
   python3 poller/poll_agentforce.py
 ```
 
-Repeat via the **EKS Collector in the demo VPC** (poller still pulls Salesforce,
-then pushes Protobuf to the Collector; Collector pushes to Zerobus):
+Repeat via **EKS in the demo VPC** (poller CronJob GETs Salesforce, POSTs
+Protobuf to the Collector ClusterIP; Collector POSTs to Zerobus):
 
 ```bash
 export AWS_PROFILE=unity-gateway-demo
 aws eks update-kubeconfig --name agentforce-otel --region ap-southeast-2
-kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
-OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py
+otel-collector/k8s/deploy.sh
+kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller
+kubectl -n agentforce-otel logs -l app=session-poller --tail=80
 ```
+
+The CronJob needs secret `sf-poller` (External Client App). Until that exists,
+use the laptop fallback: `kubectl port-forward svc/otel-collector 4318:4318`
+and `OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py`.
 
 ```sql
 SELECT time, service_name, name

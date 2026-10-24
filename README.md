@@ -39,7 +39,7 @@ The write-up is [docs/architecture.md](docs/architecture.md): Salesforce session
 
 **Live ingest (24 Oct 2026):** Agentforce session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 OTel spans → Zerobus HTTP 200 → rows in `agentforce_otel_spans`. That POST used the **public** FEVM Zerobus URL. Private Link is a **separate Suncorp network build**.
 
-**Collector in a VPC (24 Oct 2026):** EKS Fargate cluster `agentforce-otel` in `ap-southeast-2` runs `otel-collector` (ClusterIP 4317/4318) and **pushes** to public Zerobus. The poller still **pulls** Salesforce, then **pushes** Protobuf into the Collector (`kubectl port-forward`). Manifests: [`otel-collector/k8s/`](otel-collector/k8s/).
+**Collector in a VPC (24 Oct 2026):** EKS Fargate cluster `agentforce-otel` in `ap-southeast-2` runs `otel-collector` (ClusterIP 4317/4318) and POSTs to public Zerobus. The in-cluster poller is CronJob `session-poller` (`otel-collector/k8s/poller.yaml`), POSTing to the Collector ClusterIP. It needs an External Client App secret (`sf-poller`). Until that exists, the same poller runs on a laptop through `kubectl port-forward`.
 
 ## Quick start
 
@@ -57,6 +57,14 @@ ln -sf ~/.vibe/salesforce-otel/demo.env .env
 ```bash
 export AWS_PROFILE=unity-gateway-demo
 aws eks update-kubeconfig --name agentforce-otel --region ap-southeast-2
+otel-collector/k8s/deploy.sh
+kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller
+kubectl -n agentforce-otel logs -l app=session-poller --tail=80
+```
+
+Laptop fallback without an External Client App:
+
+```bash
 kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
 ```
 
@@ -101,10 +109,11 @@ Warehouse tip: start **Suncorp Pilot SQL** (`4c66e7da442d0341`) on the FEVM work
 3. Wait for Data Cloud catch-up (several minutes), then:
 
 ```bash
-# Dry-run discovery / fetch only
-DRY_RUN=true python3 poller/poll_agentforce.py
+# EKS CronJob (needs secret sf-poller)
+kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller
 
-# Pull Salesforce JSON, push Protobuf to Collector → Zerobus
+# Laptop fallback
+DRY_RUN=true python3 poller/poll_agentforce.py
 OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py
 ```
 

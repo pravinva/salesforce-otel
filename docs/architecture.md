@@ -111,10 +111,14 @@ into Data 360. The poller calls
 `332745928618`, region `ap-southeast-2`, EKS cluster `agentforce-otel`
 (Fargate).
 
-- **Poller** calls Salesforce, converts JSON to Protobuf, and POSTs either
-  to Zerobus (A1) or to the Collector at `:4318/v1/traces` (A2). In this
-  lab it runs on a laptop (`kubectl port-forward` for A2). At Suncorp, run
-  it in the same VPC as the Collector.
+- **Poller** calls Salesforce, converts JSON to Protobuf, and POSTs to the
+  Collector ClusterIP `http://otel-collector.agentforce-otel.svc.cluster.local:4318/v1/traces`.
+  On EKS that is CronJob `session-poller` in the same namespace (manifest
+  `otel-collector/k8s/poller.yaml`). A one-shot Job is
+  `kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller`.
+  The pod needs an External Client App (`SALESFORCE_CLIENT_ID` /
+  `SALESFORCE_CLIENT_SECRET`). Until that secret exists, the same poller
+  runs on a laptop through `kubectl port-forward`.
 - **OpenTelemetry Collector** receives Protobuf, batches, sets source
   attributes, refreshes OAuth, and POSTs to Zerobus. On the figure: *PUSH
   OTLP Protobuf to Zerobus*.
@@ -151,10 +155,19 @@ in a VPC on the same public hostname. FEVM `fevm-ot-pdm-semi` is a public
 workspace. Suncorp copies the Collector-in-VPC pattern onto Private Link;
 the lab host can be EKS, ECS, or an equivalent small process.
 
-From a laptop:
+Poller on EKS (same VPC as the Collector; needs External Client App in
+`sf-poller`):
 
 ```bash
 export AWS_PROFILE=unity-gateway-demo
+otel-collector/k8s/deploy.sh
+kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller
+kubectl -n agentforce-otel logs -l app=session-poller --tail=80
+```
+
+Laptop fallback (sf CLI session, no ECA):
+
+```bash
 kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
 OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py
 ```
@@ -170,7 +183,7 @@ Manifests: [`otel-collector/k8s/`](../otel-collector/k8s/). Tear down:
 | Databricks | Public FEVM `fevm-ot-pdm-semi` us-east-1 | Private Link workspace, same region as the VPC |
 | VPC | Demo VPC, EKS `agentforce-otel`, ap-southeast-2 | Suncorp VPC; Collector uses the Private Link hostname |
 | Collector | Running on Fargate | Same pattern, private DNS and PL |
-| Poller | Laptop + port-forward | Same VPC as the Collector |
+| Poller | EKS CronJob `session-poller` (laptop + port-forward until ECA exists) | Same namespace as the Collector |
 | Catalog | `ot_pdm_semi_catalog.agentforce_otel` | Suncorp UC names, same DDL |
 | Auth | SP `agentforce-zerobus-otel` | Suncorp SP, table-level `SELECT` and `MODIFY` |
 
@@ -216,10 +229,21 @@ SALESFORCE_SESSION_ID=<session-id> \
   python3 poller/poll_agentforce.py
 ```
 
-Via Collector (Phase A2):
+Via Collector on EKS (Phase A2, poller in-cluster):
 
 ```bash
-export AWS_PROFILE=unity-gateway-demo
+kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller
+kubectl -n agentforce-otel logs -l app=session-poller --tail=80
+```
+
+The CronJob posts to
+`http://otel-collector.agentforce-otel.svc.cluster.local:4318/v1/traces`.
+Unsuspend for a 2-minute schedule:
+`kubectl -n agentforce-otel patch cronjob session-poller -p '{"spec":{"suspend":false}}'`.
+
+Laptop fallback if `sf-poller` is missing:
+
+```bash
 kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
 SALESFORCE_SESSION_ID=<session-id> \
   OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces \

@@ -82,8 +82,8 @@ COMPONENT_ROWS = [
     ],
     [
         "Session poller",
-        "Laptop in the lab; Suncorp VPC in production",
-        "Discovers finished sessions, GETs JSON, converts to Protobuf, fills empty spanIds, POSTs to the Collector or to Zerobus.",
+        "EKS CronJob session-poller (same namespace as the Collector)",
+        "Discovers finished sessions, GETs JSON, converts to Protobuf, fills empty spanIds, POSTs to the Collector ClusterIP. Laptop port-forward is the fallback until an External Client App secret exists.",
     ],
     [
         "OpenTelemetry Collector",
@@ -154,7 +154,7 @@ LAB_PROD_ROWS = [
     ["Databricks", "Public FEVM fevm-ot-pdm-semi, us-east-1", "Private Link workspace in the same region as the VPC"],
     ["VPC", "Demo VPC with EKS agentforce-otel, ap-southeast-2", "Suncorp VPC; Collector uses the Private Link hostname"],
     ["Collector", "Running on Fargate", "Same pattern with private DNS and Private Link"],
-    ["Poller", "Laptop with kubectl port-forward", "Same VPC as the Collector"],
+    ["Poller", "EKS CronJob session-poller; laptop port-forward until ECA exists", "Same namespace as the Collector"],
     ["Catalog", "ot_pdm_semi_catalog.agentforce_otel", "Suncorp Unity Catalog names, same DDL"],
     ["Auth", "SP agentforce-zerobus-otel", "Suncorp SP with table-level SELECT and MODIFY"],
 ]
@@ -175,9 +175,10 @@ SECTIONS = {
         "and writes Unity Catalog Delta tables."
     ),
     "def_bridge": (
-        "<b>Telemetry bridge</b> is the poller plus a Zerobus client. The poller is the Salesforce client. "
-        "The Zerobus client is the poller itself (Phase A1) or an OpenTelemetry Collector in the VPC (Phase A2). "
-        "This lab hosted the Collector on EKS Fargate."
+        "<b>Telemetry bridge</b> is the poller plus a Zerobus client. The poller is the Salesforce client and "
+        "runs on EKS as CronJob session-poller next to the Collector. The Collector POSTs Protobuf to Zerobus. "
+        "Phase A1 posted from the laptop straight to Zerobus. The laptop port-forward remains the fallback "
+        "until an External Client App secret is on the cluster."
     ),
     "background_1": (
         "Suncorp runs customer-facing work on Salesforce Agentforce: LLM reasoning, tool calls, and CRM actions. "
@@ -228,9 +229,10 @@ SECTIONS = {
         "8-byte id so the batch is valid OTLP."
     ),
     "bridge_3": (
-        "The poller is the Salesforce client. It can POST Protobuf straight to Zerobus (Phase A1). The Collector "
-        "is the standing Databricks client for token refresh, batching, and Private Link egress from a VPC "
-        "(Phase A2). Production can host that client on EKS, ECS, a small VM, or a scheduled function."
+        "The poller is the Salesforce client. On EKS it is CronJob session-poller in namespace agentforce-otel, "
+        "POSTing to the Collector ClusterIP. It can also POST Protobuf straight to Zerobus (Phase A1). The "
+        "Collector is the standing Databricks client for token refresh, batching, and Private Link egress. "
+        "The CronJob needs SALESFORCE_CLIENT_ID and SALESFORCE_CLIENT_SECRET (External Client App)."
     ),
     "arch_1": (
         "Figure 1 reads left to right. Agentforce writes sessions into Data 360. The poller GETs the session JSON "
@@ -275,11 +277,12 @@ SECTIONS = {
         "Observe a session id, span count greater than zero, and complete status. Empty spans means Data 360 is still catching up."
     ),
     "run_4": (
-        "POST Protobuf. Phase A1: set OTEL_COLLECTOR_TRACES_URL to "
-        "https://{WORKSPACE_ID}.zerobus.{REGION}.cloud.databricks.com:443/v1/traces and run poller/poll_agentforce.py with "
-        "SALESFORCE_SESSION_ID. Phase A2: kubectl port-forward svc/otel-collector 4318:4318 and POST to "
-        "http://127.0.0.1:4318/v1/traces. Observe Exported N span(s) and HTTP 200. Synthetic check: "
-        "python3 scripts/send_direct_zerobus.py."
+        "POST Protobuf. Phase A1: set OTEL_COLLECTOR_TRACES_URL to the public Zerobus /v1/traces URL and run the "
+        "poller with SALESFORCE_SESSION_ID. Phase A2 on EKS: kubectl -n agentforce-otel create job "
+        "session-poller-once --from=cronjob/session-poller. The Job POSTs to "
+        "http://otel-collector.agentforce-otel.svc.cluster.local:4318/v1/traces. Observe Exported N span(s) and "
+        "HTTP 200 in the Job logs. Laptop fallback: kubectl port-forward and POST to 127.0.0.1:4318. Synthetic "
+        "check: python3 scripts/send_direct_zerobus.py."
     ),
     "run_5": (
         "A short Agentforce chat often fills spans first. Empty logs or metrics with populated spans is a valid session. "

@@ -46,8 +46,35 @@ kubectl -n "$NS" create secret generic otel-zerobus \
 
 kubectl -n "$NS" rollout restart deployment/otel-collector
 kubectl -n "$NS" rollout status deployment/otel-collector --timeout=180s
-kubectl -n "$NS" get pods,svc
-echo
-echo "Port-forward for the laptop poller:"
-echo "  kubectl -n $NS port-forward svc/otel-collector 4318:4318"
-echo "Then: OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py"
+
+kubectl -n "$NS" create configmap session-poller-code \
+  --from-file="$ROOT/poller/poll_agentforce.py" \
+  --from-file="$ROOT/poller/json_to_otlp.py" \
+  --from-file="$ROOT/poller/requirements.txt" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl apply -f "$ROOT/otel-collector/k8s/poller.yaml"
+
+if [[ -n "${SALESFORCE_CLIENT_ID:-}" && -n "${SALESFORCE_CLIENT_SECRET:-}" ]]; then
+  kubectl -n "$NS" create secret generic sf-poller \
+    --from-literal=SALESFORCE_INSTANCE_URL="${SALESFORCE_INSTANCE_URL:?}" \
+    --from-literal=SALESFORCE_CLIENT_ID="$SALESFORCE_CLIENT_ID" \
+    --from-literal=SALESFORCE_CLIENT_SECRET="$SALESFORCE_CLIENT_SECRET" \
+    --from-literal=SALESFORCE_API_VERSION="${SALESFORCE_API_VERSION:-v66.0}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  echo
+  echo "In-cluster poller (CronJob suspended until you unsuspend or run a Job):"
+  echo "  kubectl -n $NS create job session-poller-once --from=cronjob/session-poller"
+  echo "  kubectl -n $NS logs -l app=session-poller --tail=50"
+  echo "  kubectl -n $NS patch cronjob session-poller -p '{\"spec\":{\"suspend\":false}}'"
+else
+  echo
+  echo "CronJob session-poller is applied but Jobs fail until sf-poller exists."
+  echo "Set SALESFORCE_CLIENT_ID and SALESFORCE_CLIENT_SECRET (External Client App) in"
+  echo "$ENV_FILE, then re-run this script."
+  echo "Laptop fallback:"
+  echo "  kubectl -n $NS port-forward svc/otel-collector 4318:4318"
+  echo "  OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py"
+fi
+
+kubectl -n "$NS" get pods,svc,cronjob

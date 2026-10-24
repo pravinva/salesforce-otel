@@ -1,0 +1,70 @@
+# In-cluster poller: GET Salesforce session OTel JSON, POST Protobuf to the
+# Collector ClusterIP (no laptop port-forward).
+#
+# Requires secret sf-poller:
+#   SALESFORCE_INSTANCE_URL, SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET
+#   (External Client App client-credentials). sf CLI cannot run in the pod.
+#
+# deploy.sh writes ConfigMap session-poller-code from poller/*.py.
+#
+# One-shot (after CronJob exists):
+#   kubectl -n agentforce-otel create job session-poller-once --from=cronjob/session-poller
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: session-poller
+  namespace: agentforce-otel
+  labels:
+    app: session-poller
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  suspend: true
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: session-poller
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: poller
+              image: python:3.12-slim
+              workingDir: /app
+              command:
+                - sh
+                - -c
+                - pip install -q -r requirements.txt && python poll_agentforce.py
+              envFrom:
+                - secretRef:
+                    name: sf-poller
+              env:
+                - name: OTEL_COLLECTOR_TRACES_URL
+                  value: http://otel-collector.agentforce-otel.svc.cluster.local:4318/v1/traces
+                - name: MAX_PASSES
+                  value: "1"
+                - name: POLL_INTERVAL
+                  value: "60"
+                - name: EXPORTED_FILE
+                  value: /tmp/agentforce-exported.json
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              volumeMounts:
+                - name: app
+                  mountPath: /app
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: "500m"
+                  memory: 512Mi
+          volumes:
+            - name: app
+              configMap:
+                name: session-poller-code
