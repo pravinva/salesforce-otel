@@ -96,11 +96,17 @@ GET /services/data/v66.0/einstein/audit/otel/{session-id}
 - Empty `spanId` on evaluation spans (`TaskResolution`, `InstructionAdherence`)
   is handled in `poller/json_to_otlp.py`
 
+The poller **pulls** this JSON, converts to Protobuf, then **pushes** to the
+Collector (`OTEL_COLLECTOR_TRACES_URL`, default `http://127.0.0.1:4318/v1/traces`
+after `kubectl port-forward` to EKS).
+
 ```bash
 sf org display -o orgfarm918
 DRY_RUN=true python3 poller/poll_agentforce.py
-# Pin a session:
-SALESFORCE_SESSION_ID=01a16cb0-5079-71ce-a37e-9aee0cb3c332 python3 poller/poll_agentforce.py
+# Pin a session and push Protobuf to the Collector:
+SALESFORCE_SESSION_ID=01a16cb0-5079-71ce-a37e-9aee0cb3c332 \
+  OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces \
+  python3 poller/poll_agentforce.py
 ```
 
 ## 6. External Client App (recommended for unattended poller)

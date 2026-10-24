@@ -1,72 +1,90 @@
-Create a polished Databricks-branded enterprise reference architecture diagram titled:
+Create a polished Databricks-branded enterprise reference architecture diagram.
 
-"Suncorp — Agentforce OpenTelemetry to Databricks Lakehouse"
+Match Databricks executive-slide quality: Inter or DM Sans, four tinted columns, inner white rounded cards, a dashed VPC boundary around column 2, labeled arrows BETWEEN columns, official uploaded logos only.
 
-Subtitle:
-"Centralised AI observability: poll Salesforce session traces, convert OTLP JSON to Protobuf, ingest with Zerobus over Private Link"
+CANVAS: 16:9 landscape, white background, generous margins, 12-column grid. Flat 2D. No 3D, no photorealism, no numbered circles, no hex codes, no palette names, no instruction text.
 
-Use a clean 16:9 white canvas, crisp typography, Databricks orange/red for Databricks platform components, dark charcoal for structure, cyan only for flow arrows. This must look suitable for a Suncorp architecture review. Avoid decorative clutter, 3D, photorealism, numbered circles, and tiny unreadable text.
+TYPOGRAPHY:
+- One sans-serif throughout (Inter or DM Sans). Never mix fonts.
+- Title extra-bold charcoal about 34px, left aligned, spelled perfectly.
+- Subtitle regular about 15px, one line.
+- Column headers bold about 17px.
+- Card labels about 13px, high contrast, never tiny.
+- Arrow labels about 12px bold, sitting on or beside the arrow, never overlapping cards.
 
-Use uploaded logos exactly as provided for Databricks, Unity Catalog, and Delta Lake. Do not invent or redraw those logos.
+SPELLING LOCK. Render every label EXACTLY as written. Do not invent or misspell. Forbidden: Zorobus, 22EZorobus, sitll, garbled letters. Required exact words: Zerobus, OpenTelemetry, Protobuf, Databricks, Unity Catalog, Agentforce, Salesforce, VARIANT, OTLP, Private Link, Fargate, VPC.
 
-LAYOUT — four large equal-height columns, left to right, with a single thick cyan request arrow through all four columns:
+EXACT TITLE:
+Suncorp Agentforce OpenTelemetry to Databricks Lakehouse
 
-COLUMN 1 — "Salesforce Agentforce"
-Rounded architecture block with a Salesforce-style cloud header.
-Inside, stacked cards with short labels only:
-- Agentforce Default agent
-- Session Tracing
-- Einstein Audit (dataspace default)
-- Data 360 session DMO
-Footer of column: "OTel REST — poll, not push"
+EXACT SUBTITLE:
+Salesforce export is pull. Collector push to Zerobus is OTLP Protobuf. Collector runs in an AWS VPC on EKS.
 
-COLUMN 2 — "Telemetry bridge (Suncorp VPC)"
-Prominent badge: "RUNS IN SUNCORP VPC"
-Inside, stacked cards with short labels only:
-- Session poller
-- JSON to Protobuf
-- OpenTelemetry Collector
-- OAuth token refresh
-Footer of column: "No Kafka"
+LAYOUT: four equal-height columns left to right, arrows in the gutters between them, full-width footer strip.
 
-COLUMN 3 — "Private connectivity"
-Prominent badge: "AWS PRIVATE LINK"
-Inside, stacked cards with short labels only:
-- Front-end Private Link
-- TCP 443
-- Private DNS
-- No public Zerobus route
-Footer of column: "OTLP yes — MQTT/Kafka APIs no"
+COLUMN 1 (light gray):
+Header: Salesforce Agentforce
+Four white cards:
+Agentforce Default agent
+Session Tracing
+Einstein Audit
+Export OTel REST API
+Footer pill: GET JSON, 72 hour window
 
-COLUMN 4 — "Databricks Lakehouse (AWS)"
-Make this the visually dominant block with a highlighted Databricks platform border and the Databricks logo at the top.
-Inside, stacked cards with short labels only:
-- Zerobus Ingest OTLP
-- Unity Catalog (uploaded logo)
-- Delta VARIANT span tables (uploaded Delta logo)
-- SQL and MLflow eval
-Footer of column: "Same region as producers"
+COLUMN 2 (light cyan fill) WITH A DASHED CHARCOAL VPC BOUNDARY drawn around the whole column, labeled on the top-left of the boundary: AWS VPC ap-southeast-2
+Header inside the VPC: Telemetry bridge on EKS
+Orange badge: EKS Fargate agentforce-otel
+Five white cards:
+Session poller
+JSON to Protobuf
+OpenTelemetry Collector
+OAuth token refresh
+ClusterIP 4317 4318
+Footer pill: No Kafka
 
-Draw a thinner charcoal response/ack arrow right-to-left labeled "OTLP HTTP 200 / durable write".
+COLUMN 3 (light gray):
+Header: Path to Databricks
+Two stacked path cards, not numbered:
+Card A title: Today public HTTPS
+Card A body: Collector pushes to public Zerobus us-east-1
+Card B title: Phase B Private Link
+Card B body: Front-end Private Link TCP 443, private DNS, no public route
+Footer pill: OTLP yes, MQTT Kafka APIs no
 
-BOTTOM BAND spanning the full width, titled:
-"What this diagram proves vs what networking must still provision"
+COLUMN 4 (light coral, orange border, visually dominant):
+Header: Databricks Data Intelligence Platform
+Uploaded Databricks logo at top, unmodified.
+Four white cards:
+Zerobus Ingest OTLP
+Unity Catalog   (uploaded Unity Catalog logo)
+Delta VARIANT span tables   (uploaded Delta Lake logo)
+SQL and MLflow eval
+Footer pill: FEVM us-east-1
 
-Left half card "Phase A — demonstrated":
-- Live Agentforce session traces in Unity Catalog Delta
-- 8 spans, Zerobus HTTP 200, no message bus
-- Lab workspace is public FEVM (not Private Link)
+ARROWS — draw these as real arrows in the gutters, cyan for push, charcoal dashed for pull. Each arrow MUST have its exact label visible.
 
-Right half card "Phase B — Suncorp network build":
-- Collector in VPC, private DNS, no public Zerobus route
-- Repeat ingest + SQL from the VPC
-- Salesforce REST hop is separate (Salesforce Private Connect if required)
+Arrow 1 (charcoal dashed, right to left from column 2 poller toward column 1):
+Label: PULL GET OTel JSON
 
-Footer line:
-"Suncorp // Databricks  |  Field Engineering demonstration readout"
+Arrow 2 (short cyan, inside column 2, from poller card down to collector card):
+Label: PUSH Protobuf
 
-Typography:
-- Title 28pt-equivalent, column headers 18pt-equivalent, card labels 14pt-equivalent
-- High contrast dark text on white/light fills
-- Align all blocks to a grid with equal gutters
-- Rounded 10px architecture cards, 3px borders, consistent padding
+Arrow 3 (thick cyan, left to right from column 2 collector through column 3 into column 4 Zerobus card):
+Label: PUSH OTLP Protobuf to Zerobus
+
+Arrow 4 (thinner charcoal, right to left under arrow 3):
+Label: HTTP 200 durable write
+
+BOTTOM STRIP (full width, light gray):
+Uploaded Unity Catalog logo plus the words Unity Catalog
+Then exactly:
+Phase A: EKS collector in demo VPC, public Zerobus. Phase B: Suncorp VPC plus Private Link. Salesforce REST hop is separate.
+
+FOOTER:
+Left: Suncorp | Databricks Field Engineering
+Right: uploaded Databricks logo, small
+
+LOGOS: Use uploaded Databricks, Unity Catalog, and Delta Lake logos exactly. Do not redraw. Do not invent Salesforce logos. No filenames.
+
+VISUAL NOTES:
+Dashed VPC box must be obvious around column 2. Arrows must be visible, not hidden under columns. Rounded 12px cards. Orange only for Databricks border, badges, logo. Cyan only for push arrows and light tints. Charcoal for text and the pull arrow.

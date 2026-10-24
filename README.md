@@ -3,11 +3,17 @@
 **Suncorp demo:** ingest Salesforce **Agentforce** OpenTelemetry session traces into **Databricks on AWS** via **Zerobus Ingest** (native OTLP) — no Kafka / Kinesis.
 
 ```
-Agentforce → Session Trace OTel API (JSON)
-         → Poller (JSON→Protobuf)
-         → OpenTelemetry Collector (OAuth refresh)
-         → Zerobus Ingest OTLP
-         → Unity Catalog Delta (VARIANT)
+Agentforce  --write-->  Data 360 Session Tracing
+                 ^
+                 | PULL GET OTel JSON (Salesforce export API)
+                 |
+         Poller (JSON→Protobuf)
+                 | PUSH Protobuf :4318
+                 v
+         OpenTelemetry Collector on EKS Fargate (AWS VPC ap-southeast-2)
+                 | PUSH OTLP Protobuf + OAuth
+                 v
+         Zerobus Ingest  →  Unity Catalog Delta (VARIANT)
 ```
 
 ## Live demo environment
@@ -21,6 +27,7 @@ Agentforce → Session Trace OTel API (JSON)
 | Catalog / schema | `ot_pdm_semi_catalog.agentforce_otel` |
 | Tables | `agentforce_otel_spans`, `_logs`, `_metrics` |
 | Service principal | `agentforce-zerobus-otel` |
+| AWS (Collector) | Account `332745928618`, EKS `agentforce-otel`, region `ap-southeast-2` |
 
 Secrets live in `~/.vibe/salesforce-otel/demo.env` (not in git).
 
@@ -28,9 +35,9 @@ Secrets live in `~/.vibe/salesforce-otel/demo.env` (not in git).
 
 See [docs/architecture.md](docs/architecture.md), [docs/salesforce-setup.md](docs/salesforce-setup.md), and [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md) (Phase A vs Private Link Phase B). Architecture figure: [docs/diagrams/suncorp_agentforce_otel_zerobus.png](docs/diagrams/suncorp_agentforce_otel_zerobus.png).
 
-**Live ingest (24 Oct 2026):** Agentforce session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 OTel spans → Zerobus HTTP 200 → rows in `agentforce_otel_spans`. That was on the **public** FEVM workspace. Private Link is a **separate Suncorp network build**, not something this lab can prove.
+**Live ingest (24 Oct 2026):** Agentforce session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 OTel spans → Zerobus HTTP 200 → rows in `agentforce_otel_spans`. That POST used the **public** FEVM Zerobus URL. Private Link is a **separate Suncorp network build**.
 
-Collector YAML is the production path (EC2 or EKS in a Suncorp VPC). This lab ingested **direct OTLP Protobuf to Zerobus** when Docker was unavailable.
+**Collector in a VPC (24 Oct 2026):** EKS Fargate cluster `agentforce-otel` in `ap-southeast-2` runs `otel-collector` (ClusterIP 4317/4318) and **pushes** to public Zerobus. The poller still **pulls** Salesforce, then **pushes** Protobuf into the Collector (`kubectl port-forward`). Manifests: [`otel-collector/k8s/`](otel-collector/k8s/).
 
 ## Quick start
 
@@ -41,18 +48,25 @@ cd salesforce-otel
 ln -sf ~/.vibe/salesforce-otel/demo.env .env
 ```
 
-### 2. Start the OTel Collector (optional for local demos)
+### 2. Reach the OTel Collector
 
-Requires Docker daemon running (`colima start` or Docker Desktop):
+**Preferred (EKS in the demo VPC):**
+
+```bash
+export AWS_PROFILE=unity-gateway-demo
+aws eks update-kubeconfig --name agentforce-otel --region ap-southeast-2
+kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
+```
+
+**Local Docker** (if you are not using EKS):
 
 ```bash
 cd otel-collector
 docker-compose up -d
-docker-compose logs -f
 ```
 
-If Docker is unavailable, skip to the **direct Zerobus** smoke test below
-(Collector is still the recommended production path for OAuth refresh).
+Skip the Collector only for a contract check (`scripts/send_direct_zerobus.py`).
+Production always uses the Collector so OAuth tokens refresh.
 
 ### 3. Smoke-test Zerobus (synthetic Agentforce-like spans)
 
@@ -88,15 +102,15 @@ Warehouse tip: start **Suncorp Pilot SQL** (`4c66e7da442d0341`) on the FEVM work
 # Dry-run discovery / fetch only
 DRY_RUN=true python3 poller/poll_agentforce.py
 
-# Forward Protobuf to local collector → Zerobus
-python3 poller/poll_agentforce.py
+# Pull Salesforce JSON, push Protobuf to Collector → Zerobus
+OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py
 ```
 
 ## Repo layout
 
 ```
 sql/                 UC DDL + demo queries
-otel-collector/      Collector YAML + docker-compose (EC2/EKS-ready)
+otel-collector/      Collector YAML, docker-compose, EKS/Fargate manifests
 poller/              Salesforce Session Trace poller (JSON→Protobuf)
 scripts/             Synthetic spans + Zerobus token mint
 docs/                Architecture, Salesforce setup, Suncorp test plan, PDF/DOCX readout
@@ -104,7 +118,7 @@ docs/                Architecture, Salesforce setup, Suncorp test plan, PDF/DOCX
 
 ## Production notes
 
-- Prefer Collector on **EKS** in the Suncorp VPC for HA and Private Link; **EC2** is fine for PoC.
+- Collector already runs on **EKS Fargate** in this demo account. Suncorp production copies that pattern into their VPC and adds Private Link.
 - Grant the SP **table-level** `MODIFY` + `SELECT` (schema inheritance is not enough for Zerobus `authorization_details`).
 - Zerobus accepts **Protobuf only** on OTLP/HTTP — never post Salesforce’s JSON body directly to Zerobus.
 - **Private Link:** OTLP is supported; MQTT/Kafka Zerobus APIs are not. Test plan is in [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md).

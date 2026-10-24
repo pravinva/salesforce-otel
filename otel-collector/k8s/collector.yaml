@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentforce-otel
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: agentforce-otel
+data:
+  collector.yaml: |
+    extensions:
+      oauth2client/spans:
+        client_id: ${env:DATABRICKS_CLIENT_ID}
+        client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+        token_url: https://${env:WORKSPACE_URL}/oidc/v1/token
+        scopes: ['all-apis']
+        endpoint_params:
+          resource: 'api://databricks/workspaces/${env:WORKSPACE_ID}/zerobusDirectWriteApi'
+          authorization_details:
+            - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:CATALOG}.${env:SCHEMA}"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_spans"}]'
+      oauth2client/logs:
+        client_id: ${env:DATABRICKS_CLIENT_ID}
+        client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+        token_url: https://${env:WORKSPACE_URL}/oidc/v1/token
+        scopes: ['all-apis']
+        endpoint_params:
+          resource: 'api://databricks/workspaces/${env:WORKSPACE_ID}/zerobusDirectWriteApi'
+          authorization_details:
+            - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:CATALOG}.${env:SCHEMA}"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_logs"}]'
+      oauth2client/metrics:
+        client_id: ${env:DATABRICKS_CLIENT_ID}
+        client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+        token_url: https://${env:WORKSPACE_URL}/oidc/v1/token
+        scopes: ['all-apis']
+        endpoint_params:
+          resource: 'api://databricks/workspaces/${env:WORKSPACE_ID}/zerobusDirectWriteApi'
+          authorization_details:
+            - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:CATALOG}.${env:SCHEMA}"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_metrics"}]'
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 64
+      attributes/source:
+        actions:
+          - key: source.system
+            value: salesforce.agentforce
+            action: upsert
+          - key: demo.customer
+            value: suncorp
+            action: upsert
+    exporters:
+      otlp/spans:
+        endpoint: ${env:WORKSPACE_ID}.zerobus.${env:REGION}.cloud.databricks.com:443
+        auth:
+          authenticator: oauth2client/spans
+        headers:
+          x-databricks-zerobus-table-name: '${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_spans'
+      otlp/logs:
+        endpoint: ${env:WORKSPACE_ID}.zerobus.${env:REGION}.cloud.databricks.com:443
+        auth:
+          authenticator: oauth2client/logs
+        headers:
+          x-databricks-zerobus-table-name: '${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_logs'
+      otlp/metrics:
+        endpoint: ${env:WORKSPACE_ID}.zerobus.${env:REGION}.cloud.databricks.com:443
+        auth:
+          authenticator: oauth2client/metrics
+        headers:
+          x-databricks-zerobus-table-name: '${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_metrics'
+    service:
+      extensions: [oauth2client/spans, oauth2client/logs, oauth2client/metrics]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [attributes/source, batch]
+          exporters: [otlp/spans]
+        logs:
+          receivers: [otlp]
+          processors: [attributes/source, batch]
+          exporters: [otlp/logs]
+        metrics:
+          receivers: [otlp]
+          processors: [attributes/source, batch]
+          exporters: [otlp/metrics]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: agentforce-otel
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.114.0
+          args: ["--config=/etc/otelcol/collector.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          envFrom:
+            - secretRef:
+                name: otel-zerobus
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 4318
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: agentforce-otel
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+  type: ClusterIP

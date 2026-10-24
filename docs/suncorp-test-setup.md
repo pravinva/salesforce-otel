@@ -10,14 +10,15 @@ the Field Engineering FEVM lab — that workspace is public.
 
 | Phase | Where | What it proves | Status |
 |-------|--------|----------------|--------|
-| **A — Functional ingest** | FEVM `fevm-ot-pdm-semi` (this repo) | Agentforce → poll OTel JSON → Protobuf → Zerobus → Delta, no Kafka | **Done** (24 Oct 2026) |
-| **B — Private path** | Suncorp PL workspace, same region as producers | Traffic never uses the public Zerobus hostname | **Needs Suncorp networking** |
+| **A1 — Functional ingest** | FEVM `fevm-ot-pdm-semi` | Agentforce **pull** (OTel JSON) → Protobuf **push** → public Zerobus → Delta, no Kafka | **Done** (24 Oct 2026) |
+| **A2 — Collector in a VPC** | EKS `agentforce-otel` in AWS `332745928618` / `ap-southeast-2` | OTel Collector on Fargate **pushes** to public Zerobus | **Done** (24 Oct 2026) |
+| **B — Private path** | Suncorp PL workspace, same region as the VPC | Traffic never uses the public Zerobus hostname | **Needs Suncorp networking** |
 
-Phase B is extra network work. It does not require re-enabling Salesforce
-Session Tracing if Suncorp already has a Data Cloud + Agentforce org; it
-requires VPC endpoints, private DNS, and a collector in a Suncorp VPC.
+Salesforce export is always **pull**. Zerobus ingest is always **push**. Phase B
+does not change that; it only privatises the Collector → Zerobus hop (VPC
+endpoint, private DNS, no public Zerobus route).
 
-## Phase A — already demonstrated (FEVM)
+## Phase A — already demonstrated (FEVM ingest + EKS Collector)
 
 Live session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` (utterance: *Hello, what can
 you do?*) produced **8 spans**. Zerobus returned HTTP **200**. Rows in
@@ -25,16 +26,23 @@ you do?*) produced **8 spans**. Zerobus returned HTTP **200**. Rows in
 `GeneralCRM_16jaj000003iyMv`, `AiCopilot__ReactInitialPrompt`,
 `CLOSED_USER_REQUEST`, `TaskResolution`, `InstructionAdherence`.
 
-Repeat on FEVM:
+Repeat on FEVM (direct push, no Collector):
 
 ```bash
-# Synthetic contract check
 python3 scripts/send_direct_zerobus.py
-
-# After a chat / sf agent test run (Data Cloud catch-up can take several minutes)
 DRY_RUN=true python3 poller/poll_agentforce.py
 OTEL_COLLECTOR_TRACES_URL="https://${WORKSPACE_ID}.zerobus.${REGION}.cloud.databricks.com:443/v1/traces" \
-  python3 poller/poll_agentforce.py   # or scripts/send_direct_zerobus.py-style POST
+  python3 poller/poll_agentforce.py
+```
+
+Repeat via the **EKS Collector in the demo VPC** (poller still pulls Salesforce,
+then pushes Protobuf to the Collector; Collector pushes to Zerobus):
+
+```bash
+export AWS_PROFILE=unity-gateway-demo
+aws eks update-kubeconfig --name agentforce-otel --region ap-southeast-2
+kubectl -n agentforce-otel port-forward svc/otel-collector 4318:4318
+OTEL_COLLECTOR_TRACES_URL=http://127.0.0.1:4318/v1/traces python3 poller/poll_agentforce.py
 ```
 
 ```sql
@@ -93,18 +101,19 @@ That is the evidence Suncorp’s “full Private Link” control is doing work.
 |------|--------|
 | VPC endpoint, DNS, SG, no public Zerobus route | Suncorp network / cloud |
 | Workspace PL registration, serverless IP allowlist | Suncorp Databricks admin + Databricks SA |
-| Collector + poller on EKS/EC2 in the VPC | Suncorp platform / FE overlay |
+| Collector + poller on EKS in the Suncorp VPC | Suncorp platform (pattern already on FE EKS `agentforce-otel`) |
 | Agentforce session + Data Cloud tracing | Suncorp Salesforce admin |
 | Repeat ingest + SQL readout | Joint |
 
 ## Recommended sequence for Suncorp
 
-1. Accept Phase A (this repo) as the **functional** proof — no message bus.
+1. Accept Phase A1 (direct ingest) and A2 (Collector on EKS in a VPC) as the
+   **functional** proof — no message bus; pull from Salesforce, push to Zerobus.
 2. Book a Phase B window on a **non-prod PL workspace** in the producer region.
-3. Deploy this repo’s Collector YAML in the VPC (swap catalog/schema/workspace
-   ID; keep Protobuf + `x-databricks-zerobus-table-name`).
+3. Reuse [`otel-collector/k8s/`](../otel-collector/k8s/) in the Suncorp VPC
+   (swap catalog/schema/workspace ID; keep Protobuf + `x-databricks-zerobus-table-name`).
 4. Run PL-1 … PL-5 with a synthetic span first, then one live Agentforce chat.
-5. Only then discuss HA (EKS), logs/metrics tables, and MLflow eval on VARIANT.
+5. Only then discuss HA replicas, logs/metrics tables, and MLflow eval on VARIANT.
 
 ## Out of scope until Phase B exists
 

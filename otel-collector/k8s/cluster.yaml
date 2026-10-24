@@ -1,0 +1,31 @@
+# Minimal EKS + Fargate cluster for the Agentforce OTel Collector.
+# Account: 332745928618 (unity-gateway-demo)  Region: ap-southeast-2
+#
+#   AWS_PROFILE=unity-gateway-demo eksctl create cluster -f otel-collector/k8s/cluster.yaml
+#   AWS_PROFILE=unity-gateway-demo eksctl delete cluster -f otel-collector/k8s/cluster.yaml
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: agentforce-otel
+  region: ap-southeast-2
+  version: "1.32"
+  tags:
+    project: suncorp-agentforce-otel
+    owner: pravin.varma@databricks.com
+
+iam:
+  withOIDC: true
+
+fargateProfiles:
+  - name: fp-default
+    selectors:
+      - namespace: default
+      - namespace: kube-system
+      - namespace: agentforce-otel
+
+cloudWatch:
+  clusterLogging:
+    enableTypes: ["*"]
+    logRetentionInDays: 7
