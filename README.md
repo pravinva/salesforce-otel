@@ -39,19 +39,29 @@ cd salesforce-otel
 ln -sf ~/.vibe/salesforce-otel/demo.env .env
 ```
 
-### 2. Start the OTel Collector
+### 2. Start the OTel Collector (optional for local demos)
+
+Requires Docker daemon running (`colima start` or Docker Desktop):
 
 ```bash
 cd otel-collector
-docker compose up -d
-docker compose logs -f
+docker-compose up -d
+docker-compose logs -f
 ```
+
+If Docker is unavailable, skip to the **direct Zerobus** smoke test below
+(Collector is still the recommended production path for OAuth refresh).
 
 ### 3. Smoke-test Zerobus (synthetic Agentforce-like spans)
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r poller/requirements.txt
+
+# A) Direct to Zerobus (no Collector) — verified on this FEVM workspace
+python3 scripts/send_direct_zerobus.py
+
+# B) Via local Collector (when Docker is up)
 python3 scripts/send_synthetic_spans.py
 ```
 

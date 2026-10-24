@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 import uuid
@@ -81,10 +80,11 @@ def mint_token() -> str:
 
 
 def build_payload() -> dict:
+    """Build OTLP/JSON payload with hex IDs (same shape Salesforce returns)."""
     now_ns = time.time_ns()
-    trace_id = uuid.uuid4().hex
-    root = uuid.uuid4().hex[:16]
-    child = uuid.uuid4().hex[:16]
+    trace_id = uuid.uuid4().bytes.hex()          # 32 hex chars = 16 bytes
+    root = uuid.uuid4().bytes[:8].hex()           # 16 hex chars = 8 bytes
+    child = uuid.uuid4().bytes[:8].hex()
     return {
         "resourceSpans": [
             {

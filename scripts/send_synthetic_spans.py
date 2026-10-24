@@ -25,7 +25,8 @@ from json_to_otlp import to_export_trace_request_bytes  # noqa: E402
 
 
 def _hex_id(nbytes: int) -> str:
-    return uuid.uuid4().hex[: nbytes * 2]
+    """Return lowercase hex for nbytes of randomness (OTLP/JSON ID encoding)."""
+    return uuid.uuid4().bytes[:nbytes].hex()
 
 
 def build_payload() -> dict:

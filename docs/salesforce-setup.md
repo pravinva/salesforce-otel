@@ -6,19 +6,38 @@ Org used for this demo:
 - Username: `pravin.varmadbrx.24b133d4e353@agentforce.com`
 - Alias (sf CLI): `orgfarm918`
 
+## Current org status (checked during scaffold)
+
+Against `orgfarm-91850b6147-dev-ed`:
+
+| Check | Result |
+|-------|--------|
+| sf CLI login | Connected (`orgfarm918`) |
+| `AiAgent` sObject | Present |
+| Session Trace OTel API | **`FUNCTIONALITY_NOT_ENABLED`** (`EinsteinAuditResourceFamily`) |
+| `ssot__AiAgentSession__dlm` | **Not available** (Data 360 Session Tracing DMOs not provisioned) |
+
+Until Einstein Audit / Session Tracing is enabled, the poller cannot fetch live
+Agentforce OTel. The Databricks Zerobus path is already validated with synthetic spans.
+
 ## 1. Enable Agentforce
 
 1. Setup → Quick Find → **Agentforce Settings**
 2. Toggle **Enable Agentforce** → On
 
-## 2. Enable Session Tracing + Audit
+## 2. Enable Data 360 + Session Tracing + Audit
 
-1. Setup → **Einstein Audit, Analytics, and Monitoring Setup**
-2. Confirm a dataspace is selected (often `default`)
-3. Turn on:
+1. Setup → **Data Cloud Setup Home** — turn on Data 360 and wait until live
+2. Setup → **Einstein Audit, Analytics, and Monitoring Setup**
+3. Confirm a dataspace is selected (often `default`)
+4. Turn on:
    - **Agentforce Session Tracing** (Data model can take ~10 minutes)
    - **Audit and Feedback**
    - **Agent Platform Tracing** if listed
+
+If the OTel API still returns `FUNCTIONALITY_NOT_ENABLED`, the org edition may
+lack Einstein Audit entitlements — use a **Data Cloud & Agentforce Developer Trial**
+from [Salesforce free trials](https://www.salesforce.com/form/developer-signup/) rather than a plain OrgFarm.
 
 ## 3. Activate Data 360 streams
 
