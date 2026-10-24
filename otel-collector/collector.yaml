@@ -1,0 +1,98 @@
+# OpenTelemetry Collector -> Databricks Zerobus Ingest (OTLP/gRPC + OAuth refresh)
+# Docs: https://docs.databricks.com/aws/en/ingestion/opentelemetry/configure
+#
+# Required env vars (see ../.env.example):
+#   DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+#   WORKSPACE_URL, WORKSPACE_ID, REGION
+#   CATALOG, SCHEMA, TABLE_PREFIX
+
+extensions:
+  oauth2client/spans:
+    client_id: ${env:DATABRICKS_CLIENT_ID}
+    client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+    token_url: https://${env:WORKSPACE_URL}/oidc/v1/token
+    scopes: ['all-apis']
+    endpoint_params:
+      resource: 'api://databricks/workspaces/${env:WORKSPACE_ID}/zerobusDirectWriteApi'
+      authorization_details:
+        - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:CATALOG}.${env:SCHEMA}"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_spans"}]'
+
+  oauth2client/logs:
+    client_id: ${env:DATABRICKS_CLIENT_ID}
+    client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+    token_url: https://${env:WORKSPACE_URL}/oidc/v1/token
+    scopes: ['all-apis']
+    endpoint_params:
+      resource: 'api://databricks/workspaces/${env:WORKSPACE_ID}/zerobusDirectWriteApi'
+      authorization_details:
+        - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:CATALOG}.${env:SCHEMA}"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_logs"}]'
+
+  oauth2client/metrics:
+    client_id: ${env:DATABRICKS_CLIENT_ID}
+    client_secret: ${env:DATABRICKS_CLIENT_SECRET}
+    token_url: https://${env:WORKSPACE_URL}/oidc/v1/token
+    scopes: ['all-apis']
+    endpoint_params:
+      resource: 'api://databricks/workspaces/${env:WORKSPACE_ID}/zerobusDirectWriteApi'
+      authorization_details:
+        - '[{"type":"unity_catalog_privileges","privileges":["USE CATALOG"],"object_type":"CATALOG","object_full_path":"${env:CATALOG}"},{"type":"unity_catalog_privileges","privileges":["USE SCHEMA"],"object_type":"SCHEMA","object_full_path":"${env:CATALOG}.${env:SCHEMA}"},{"type":"unity_catalog_privileges","privileges":["SELECT","MODIFY"],"object_type":"TABLE","object_full_path":"${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_metrics"}]'
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 64
+  attributes/source:
+    actions:
+      - key: source.system
+        value: salesforce.agentforce
+        action: upsert
+      - key: demo.customer
+        value: suncorp
+        action: upsert
+
+exporters:
+  otlp/spans:
+    endpoint: ${env:WORKSPACE_ID}.zerobus.${env:REGION}.cloud.databricks.com:443
+    auth:
+      authenticator: oauth2client/spans
+    headers:
+      x-databricks-zerobus-table-name: '${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_spans'
+  otlp/logs:
+    endpoint: ${env:WORKSPACE_ID}.zerobus.${env:REGION}.cloud.databricks.com:443
+    auth:
+      authenticator: oauth2client/logs
+    headers:
+      x-databricks-zerobus-table-name: '${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_logs'
+  otlp/metrics:
+    endpoint: ${env:WORKSPACE_ID}.zerobus.${env:REGION}.cloud.databricks.com:443
+    auth:
+      authenticator: oauth2client/metrics
+    headers:
+      x-databricks-zerobus-table-name: '${env:CATALOG}.${env:SCHEMA}.${env:TABLE_PREFIX}_otel_metrics'
+  # Local debug sink (optional) — uncomment and add to pipelines for troubleshooting
+  # debug:
+  #   verbosity: detailed
+
+service:
+  extensions: [oauth2client/spans, oauth2client/logs, oauth2client/metrics]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [attributes/source, batch]
+      exporters: [otlp/spans]
+    logs:
+      receivers: [otlp]
+      processors: [attributes/source, batch]
+      exporters: [otlp/logs]
+    metrics:
+      receivers: [otlp]
+      processors: [attributes/source, batch]
+      exporters: [otlp/metrics]

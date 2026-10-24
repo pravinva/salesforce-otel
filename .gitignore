@@ -1,0 +1,34 @@
+# Secrets & local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+.poller-state.json
+.agentforce-exported.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OTel / local runtime
+otelcol-contrib
+otelcol
+*.log
+.poller-exported.json
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Samples that may contain PII
+samples/live/

@@ -1,0 +1,19 @@
+# Local demo: run the OTel Collector on Docker (maps to EC2/EKS in production).
+# Usage:
+#   ln -sf ~/.vibe/salesforce-otel/demo.env ../.env
+#   set -a && source ../.env && set +a
+#   docker compose up
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    container_name: agentforce-otel-collector
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./collector.yaml:/etc/otelcol/collector.yaml:ro
+    env_file:
+      - ../.env
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    restart: unless-stopped
