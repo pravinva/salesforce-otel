@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Poll Salesforce Agentforce Session Trace OTel API and forward to OTel Collector.
+"""Pull Salesforce Agentforce OTel JSON and push Protobuf to the OTel Collector.
 
-Architecture (demo):
+Salesforce's "Export Agentforce Session Tracing Data" API is a REST GET, not an
+OpenTelemetry exporter. Agentforce does not POST to Zerobus. This process is the
+missing exporter:
+
   Agentforce session
     -> Data 360 Session Tracing
-    -> GET /services/data/v66.0/einstein/audit/otel/{sessionId}  (OTLP JSON)
+    -> GET /services/data/v66.0/einstein/audit/otel/{sessionId}  (OTLP JSON, pull)
     -> this poller (JSON -> Protobuf)
-    -> OTel Collector :4318/v1/traces
+    -> OTel Collector :4318/v1/traces  (push)
     -> Databricks Zerobus Ingest
     -> Unity Catalog Delta tables (VARIANT)
 
-Salesforce does NOT push OTLP outbound today — polling is required (beta API).
 Zerobus rejects application/json — Protobuf conversion is mandatory.
 """
 

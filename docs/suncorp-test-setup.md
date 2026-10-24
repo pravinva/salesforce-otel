@@ -2,6 +2,10 @@
 
 ![Suncorp Agentforce OpenTelemetry to Databricks Lakehouse](diagrams/suncorp_agentforce_otel_zerobus.png)
 
+Background and architecture (what Salesforce ships vs an OTel exporter, why
+the bridge exists) are in [architecture.md](architecture.md). This page is
+the test plan only.
+
 Suncorp wants Agentforce OTel traces in Databricks for centralised AI
 observability, on workspaces with **AWS Private Link enforced end-to-end**.
 
@@ -14,9 +18,11 @@ the Field Engineering FEVM lab — that workspace is public.
 | **A2 — Collector in a VPC** | EKS `agentforce-otel` in AWS `332745928618` / `ap-southeast-2` | OTel Collector on Fargate **pushes** to public Zerobus | **Done** (24 Oct 2026) |
 | **B — Private path** | Suncorp PL workspace, same region as the VPC | Traffic never uses the public Zerobus hostname | **Needs Suncorp networking** |
 
-Salesforce export is always **pull**. Zerobus ingest is always **push**. Phase B
-does not change that; it only privatises the Collector → Zerobus hop (VPC
-endpoint, private DNS, no public Zerobus route).
+Salesforce’s “OTel export” API is always **pull** (`GET` JSON for one session).
+It is **not** an OpenTelemetry exporter and cannot be aimed at Zerobus.
+Zerobus ingest is always **push** (OTLP Protobuf POST). The poller + Collector
+are the bridge. Phase B does not change that; it only privatises the
+Collector → Zerobus hop (VPC endpoint, private DNS, no public Zerobus route).
 
 ## Phase A — already demonstrated (FEVM ingest + EKS Collector)
 

@@ -1,6 +1,8 @@
 # salesforce-otel
 
-**Suncorp demo:** ingest Salesforce **Agentforce** OpenTelemetry session traces into **Databricks on AWS** via **Zerobus Ingest** (native OTLP) — no Kafka / Kinesis.
+**Suncorp demo:** ingest Salesforce **Agentforce** session traces into **Databricks on AWS** via **Zerobus Ingest** (native OTLP) — no Kafka / Kinesis.
+
+Salesforce’s [OTel export API](https://developer.salesforce.com/docs/ai/agentforce/guide/otel-api.html) is a **GET of JSON for one session**, not an OpenTelemetry exporter that pushes to Zerobus. This repo’s poller is that missing exporter: pull JSON, convert to Protobuf, push to the Collector. Details: [docs/architecture.md](docs/architecture.md).
 
 ```
 Agentforce  --write-->  Data 360 Session Tracing
@@ -33,7 +35,7 @@ Secrets live in `~/.vibe/salesforce-otel/demo.env` (not in git).
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/salesforce-setup.md](docs/salesforce-setup.md), and [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md) (Phase A vs Private Link Phase B). Architecture figure: [docs/diagrams/suncorp_agentforce_otel_zerobus.png](docs/diagrams/suncorp_agentforce_otel_zerobus.png).
+The write-up is [docs/architecture.md](docs/architecture.md): Salesforce session-trace GET, Zerobus Protobuf POST, the poller/Collector bridge, and hop-by-hop architecture. Salesforce setup: [docs/salesforce-setup.md](docs/salesforce-setup.md). Phase A vs Private Link: [docs/suncorp-test-setup.md](docs/suncorp-test-setup.md). Figure: [docs/diagrams/suncorp_agentforce_otel_zerobus.png](docs/diagrams/suncorp_agentforce_otel_zerobus.png). PDF/DOCX: [docs/Suncorp_Agentforce_OTel_Databricks_Readout.pdf](docs/Suncorp_Agentforce_OTel_Databricks_Readout.pdf).
 
 **Live ingest (24 Oct 2026):** Agentforce session `01a16cb0-5079-71ce-a37e-9aee0cb3c332` → 8 OTel spans → Zerobus HTTP 200 → rows in `agentforce_otel_spans`. That POST used the **public** FEVM Zerobus URL. Private Link is a **separate Suncorp network build**.
 
